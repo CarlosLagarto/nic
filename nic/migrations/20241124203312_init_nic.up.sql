@@ -1,0 +1,23 @@
+-- Add migration script here
+CREATE TABLE IF NOT EXISTS weather (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    state TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS watering_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id INTEGER,
+    sector_id INTEGER NOT NULL,
+    start_time TEXT NOT NULL,
+    duration INTEGER NOT NULL,
+    water_applied REAL NOT NULL,
+    type TEXT NOT NULL
+);
