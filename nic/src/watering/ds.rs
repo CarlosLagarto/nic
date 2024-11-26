@@ -34,6 +34,7 @@ pub enum EnvironmentalSignal {
     RainStart,
     RainStop,
     HighWind,
+    LowWind
 }
 #[derive(Debug, Clone)]
 pub enum ControlSignal {

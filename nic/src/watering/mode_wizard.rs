@@ -33,7 +33,7 @@ impl ModeWizard {
     ) {
         match signal {
             EnvironmentalSignal::RainStart | EnvironmentalSignal::HighWind => {
-                println!("Wizard Mode: Detected rain. Pausing irrigation.");
+                println!("Wizard Mode: Detected {:?}. Pausing irrigation.", signal);
                 if self.paused_state.is_none() && state_machine.cycle.is_some() {
                     println!("Pausing irrigation due to {:?}", signal);
                     // Save the current state, cycle, and instruction index
@@ -48,16 +48,21 @@ impl ModeWizard {
                     state_machine.state = WateringState::Idle;
                 }
             }
-            EnvironmentalSignal::RainStop => {
+            EnvironmentalSignal::RainStop | EnvironmentalSignal::LowWind => {
                 if let Some((saved_state, saved_cycle, saved_instruction)) =
                     self.paused_state.take()
                 {
-                    println!("Resuming irrigation after rain.");
+                    println!("Resuming irrigation after {:?}.", signal);
 
                     // Restore the saved state
                     state_machine.state = saved_state;
                     state_machine.cycle = Some(saved_cycle);
                     state_machine.current_instruction = saved_instruction;
+                } else {
+                    println!(
+                        "Wizard Mode: No paused state to resume. Ignoring {:?}:?",
+                        signal
+                    );
                 }
             }
         }
@@ -239,7 +244,7 @@ mod mode_wizard_tests {
 
         // No progress yet
         let result = wizard.calculate_irrigation_time(&sector);
-        assert_eq!(result, Some(Duration::minutes(30))); // 2.5 cm at 1.0 cm/hour  
+        assert_eq!(result, Some(Duration::minutes(30))); // 2.5 cm at 1.0 cm/hour
     }
 
     #[test]
