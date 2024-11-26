@@ -1,16 +1,15 @@
-use crate::tests::mock_sensors::set_sensor_controller;
-use crate::{
-    db::mock::MockDatabase,
-    watering::{
-        api::{
-            get_cycle, get_state, switch_to_auto, switch_to_manual, switch_to_wizard, CycleResponse,
-        },
-        ds::{AppState, Cycle},
-        mode::ModeEnum,
-    },
+use crate::common::{
+    mock_db::{new_with_mock, MockDatabase},
+    mock_sensors::set_sensor_controller,
 };
 use axum::{body::Body, extract::Request, routing::post, Router};
 use hyper::StatusCode;
+use nic::{
+    api::{
+        get_cycle, get_state, switch_to_auto, switch_to_manual, switch_to_wizard, CycleResponse,
+    },
+    watering::{ds::Cycle, mode::ModeEnum},
+};
 use std::usize;
 use tower::ServiceExt;
 
@@ -18,7 +17,7 @@ use tower::ServiceExt;
 async fn test_switch_to_auto() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     let app = Router::new()
         .route("/switch/auto", post(switch_to_auto))
@@ -45,7 +44,7 @@ async fn test_switch_to_auto() {
 async fn test_switch_to_manual() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     let app = Router::new()
         .route("/switch/manual", post(switch_to_manual))
@@ -72,7 +71,7 @@ async fn test_switch_to_manual() {
 async fn test_switch_to_wizard() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     let app = Router::new()
         .route("/switch/wizard", post(switch_to_wizard))
@@ -99,7 +98,7 @@ async fn test_switch_to_wizard() {
 async fn test_get_state() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     let app = Router::new()
         .route("/state", post(get_state))
@@ -127,9 +126,8 @@ async fn test_get_state() {
 async fn test_get_cycle() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
-    // Set a cycle for testing
     {
         let mut state_machine = app_state.watering_system.state_machine.write().await;
         state_machine.start_cycle(Cycle {

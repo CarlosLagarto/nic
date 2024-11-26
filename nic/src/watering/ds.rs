@@ -1,18 +1,19 @@
 use super::{interface::SensorController, state_machine::WateringSystem};
-use crate::db::{mock::MockDatabase, Database};
+use crate::db::Database;
+
 use chrono::Duration;
 use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct SectorInfo {
     pub id: u32,
     /// cm /hour
-    pub sprinkler_debit: f64,   // cm/hour (sprinkler output rate)
+    pub sprinkler_debit: f64, // cm/hour (sprinkler output rate)
     /// mm/hour
-    pub percolation_rate: f64,  // mm/hour (soil percolation rate)
+    pub percolation_rate: f64, // mm/hour (soil percolation rate)
     /// in minutes
     pub max_duration: Duration, // Maximum safe watering duration per session
     /// cm
-    pub weekly_target: f64,     // Weekly water target (cm)
+    pub weekly_target: f64, // Weekly water target (cm)
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -34,7 +35,7 @@ pub enum EnvironmentalSignal {
     RainStart,
     RainStop,
     HighWind,
-    LowWind
+    LowWind,
 }
 #[derive(Debug, Clone)]
 pub enum ControlSignal {
@@ -52,7 +53,6 @@ pub struct WeatherConditions {
     pub wind_speed: f64, // in km/h or m/s
 }
 
-
 pub struct AppState<C: SensorController> {
     pub db: Database,
     pub watering_system: Arc<WateringSystem<C>>,
@@ -63,14 +63,6 @@ impl<C: SensorController> AppState<C> {
         let watering_system = WateringSystem::new(controler).await;
         Arc::new(AppState {
             db,
-            watering_system,
-        })
-    }
-
-    pub async fn new_with_mock(db: MockDatabase, controler: Arc<C>) -> Arc<Self> {
-        let watering_system = WateringSystem::new(controler).await;
-        Arc::new(AppState {
-            db: Database { sender: db.sender.clone() }, // Use the mock database sender
             watering_system,
         })
     }

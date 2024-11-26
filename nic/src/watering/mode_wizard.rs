@@ -80,7 +80,7 @@ impl ModeWizard {
             return;
         }
 
-        // Optional: Recalculate schedules or adjust progress
+        // TODO: Recalculate schedules or adjust progress
         self.recalculate_progress(state_machine);
     }
 
@@ -134,7 +134,6 @@ impl ModeWizard {
 
                     state_machine.start_cycle(cycle);
 
-                    // Update progress immediately for the scheduled sector
                     self.update_progress(sector.id, duration, &sector);
                 } else {
                     println!(
@@ -147,11 +146,11 @@ impl ModeWizard {
 
         if state_machine.cycle.is_some() {
             state_machine.update(db.clone(), "Wizard", controller).await;
-            // self.update_progress(sector.id, duration, &sector);
         }
     }
 
     pub fn valid_weather_conditions(&self, db: Database) -> bool {
+        // TODO:
         // Simulate a weather check
         // In practice, this might query a database or external API
         println!("Wizard Mode: Checking weather conditions...");

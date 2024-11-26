@@ -1,9 +1,19 @@
 use chrono::NaiveTime;
 
-use crate::{db::mock::MockDatabase, tests::mock_sensors::set_sensor_controller, watering::{ds::{AppState, Cycle, SectorInfo, WateringState}, interface::SensorController, schedule::AllowedTimeframe}};
-
-use mockall::mock;
 use async_trait::async_trait;
+use mockall::mock;
+use nic::watering::{
+    ds::{Cycle, SectorInfo, WateringState},
+    interface::SensorController,
+    schedule::AllowedTimeframe,
+};
+
+#[path = "common/mod.rs"]
+mod common;
+use crate::common::{
+    mock_db::{new_with_mock, MockDatabase},
+    mock_sensors::set_sensor_controller,
+};
 
 mock! {
     pub SensorController {}
@@ -19,7 +29,7 @@ mock! {
 async fn test_watering_at_right_times() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller.clone()).await;
+    let app_state = new_with_mock(db, controller.clone()).await;
 
     // Define allowed timeframe: 6 AM to 10 PM
     let allowed_timeframe = AllowedTimeframe {
@@ -52,7 +62,7 @@ async fn test_watering_at_right_times() {
     // Simulate watering execution at various times
     let test_cases = vec![
         (NaiveTime::from_hms_opt(5, 30, 0).unwrap(), false), // Before allowed timeframe
-        (NaiveTime::from_hms_opt(7, 0, 0).unwrap(), true),  // Within allowed timeframe
+        (NaiveTime::from_hms_opt(7, 0, 0).unwrap(), true),   // Within allowed timeframe
         (NaiveTime::from_hms_opt(22, 30, 0).unwrap(), false), // After allowed timeframe
     ];
 
@@ -71,13 +81,23 @@ async fn test_watering_at_right_times() {
         let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
 
         // Call the execute function
-        wizard_mode.execute(&mut *state_machine, app_state.db.clone(), time, &controller).await;
+        wizard_mode
+            .execute(&mut *state_machine, app_state.db.clone(), time, &controller)
+            .await;
 
         // Verify watering state
         if should_water {
-            assert_ne!(state_machine.state, WateringState::Idle, "Expected watering to start.");
+            assert_ne!(
+                state_machine.state,
+                WateringState::Idle,
+                "Expected watering to start."
+            );
         } else {
-            assert_eq!(state_machine.state, WateringState::Idle, "Expected no watering outside timeframe.");
+            assert_eq!(
+                state_machine.state,
+                WateringState::Idle,
+                "Expected no watering outside timeframe."
+            );
         }
 
         // Reset state

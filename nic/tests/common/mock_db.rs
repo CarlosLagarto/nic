@@ -1,10 +1,24 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 
-use crate::watering::ds::{Cycle, SectorInfo, WeatherConditions};
+use nic::db::{Database, DatabaseCommand};
+use nic::watering::ds::{AppState, Cycle, SectorInfo, WeatherConditions};
+use nic::watering::interface::SensorController;
+use nic::watering::state_machine::WateringSystem;
 
-use super::DatabaseCommand;
+pub async fn new_with_mock<C: SensorController>(
+    db: MockDatabase,
+    controler: Arc<C>,
+) -> Arc<AppState<C>> {
+    let watering_system = WateringSystem::new(controler).await;
+    Arc::new(AppState {
+        db: Database {
+            sender: db.sender.clone(),
+        }, // Use the mock database sender
+        watering_system,
+    })
+}
 
 #[derive(Clone)]
 pub struct MockDatabase {
@@ -22,7 +36,9 @@ impl MockDatabase {
         std::thread::spawn(move || {
             while let Ok(command) = rx.recv() {
                 match command {
-                    DatabaseCommand::Execute { query, response, .. } => {
+                    DatabaseCommand::Execute {
+                        query, response, ..
+                    } => {
                         println!("Mock execute: {}", query);
                         let _ = response.send(Ok(1)); // Simulate a successful execution
                     }
@@ -30,10 +46,13 @@ impl MockDatabase {
                         println!("Mock execute batch: {}", query);
                         let _ = response.send(Ok(())); // Simulate a successful batch execution
                     }
-                    DatabaseCommand::QueryRow { query, response, .. } => {
+                    DatabaseCommand::QueryRow {
+                        query, response, ..
+                    } => {
                         println!("Mock query row: {}", query);
                         let result = data_clone.lock().unwrap().get(&query).cloned();
-                        let _ = response.send(result.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows));
+                        let _ = response
+                            .send(result.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows));
                     }
                     DatabaseCommand::LoadSectors { response } => {
                         println!("Mock load sectors");

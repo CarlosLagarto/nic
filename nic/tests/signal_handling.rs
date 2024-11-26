@@ -1,15 +1,18 @@
-use crate::{
-    db::mock::MockDatabase,
-    tests::mock_sensors::set_sensor_controller,
-    watering::ds::{AppState, Cycle, EnvironmentalSignal, WateringState},
-};
 use chrono::Duration;
+use nic::watering::ds::{Cycle, EnvironmentalSignal, WateringState};
+
+#[path = "common/mod.rs"]
+mod common;
+use common::{
+    mock_db::{new_with_mock, MockDatabase},
+    mock_sensors::set_sensor_controller,
+};
 
 #[tokio::test]
 async fn test_signal_handling() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
     state_machine.start_cycle(Cycle {
@@ -30,11 +33,10 @@ async fn test_signal_handling() {
 async fn test_weather_signal_handling_all_states() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    // Start with a cycle
     state_machine.start_cycle(Cycle {
         id: 1,
         instructions: vec![(1, chrono::Duration::minutes(30))],
@@ -42,10 +44,8 @@ async fn test_weather_signal_handling_all_states() {
 
     let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
 
-    // Transition to Activating state
     state_machine.state = WateringState::Activating(1);
 
-    // Test entering and leaving RainStart
     wizard_mode.handle_signal(EnvironmentalSignal::RainStart, &mut *state_machine);
     assert_eq!(state_machine.state, WateringState::Idle); // Paused due to rain
     assert!(wizard_mode.paused_state.is_some());
@@ -55,7 +55,6 @@ async fn test_weather_signal_handling_all_states() {
     assert!(state_machine.cycle.is_some()); // Cycle restored
     assert_eq!(state_machine.state, WateringState::Activating(1)); // Resume properly
 
-    // Test entering and leaving HighWind
     state_machine.state = WateringState::Watering(1); // Set state to watering
     wizard_mode.handle_signal(EnvironmentalSignal::HighWind, &mut *state_machine);
     assert_eq!(state_machine.state, WateringState::Idle); // Paused due to high wind
@@ -66,7 +65,6 @@ async fn test_weather_signal_handling_all_states() {
     assert!(state_machine.cycle.is_some());
     assert_eq!(state_machine.state, WateringState::Watering(1)); // Resume properly
 
-    // Test transitions from idle and active states
     state_machine.state = WateringState::Activating(1);
     wizard_mode.handle_signal(EnvironmentalSignal::RainStart, &mut *state_machine);
     assert_eq!(state_machine.state, WateringState::Idle); // Paused from activating state
@@ -82,11 +80,10 @@ async fn test_weather_signal_handling_all_states() {
 async fn test_signal_handling_high_wind_and_low_wind() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    // Start a cycle and set state to Watering
     state_machine.start_cycle(Cycle {
         id: 1,
         instructions: vec![(1, chrono::Duration::minutes(30))],
@@ -95,14 +92,12 @@ async fn test_signal_handling_high_wind_and_low_wind() {
 
     let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
 
-    // Test HighWind signal
     wizard_mode.handle_signal(EnvironmentalSignal::HighWind, &mut *state_machine);
     assert_eq!(state_machine.state, WateringState::Idle); // Irrigation paused
     assert!(wizard_mode.paused_state.is_some());
 
-    // Test LowWind signal to resume
     wizard_mode.handle_signal(EnvironmentalSignal::LowWind, &mut *state_machine);
-    assert!(state_machine.cycle.is_some()); // Cycle resumed
+    assert!(state_machine.cycle.is_some());
     assert_eq!(state_machine.state, WateringState::Watering(1)); // Resumes watering state
 }
 
@@ -110,11 +105,10 @@ async fn test_signal_handling_high_wind_and_low_wind() {
 async fn test_signal_handling_high_wind() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    // Start a cycle and set state to Watering
     state_machine.start_cycle(Cycle {
         id: 1,
         instructions: vec![(1, chrono::Duration::minutes(30))],
@@ -123,10 +117,8 @@ async fn test_signal_handling_high_wind() {
 
     let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
 
-    // Test HighWind signal
     wizard_mode.handle_signal(EnvironmentalSignal::HighWind, &mut *state_machine);
 
-    // Ensure the irrigation is paused
     assert_eq!(state_machine.state, WateringState::Idle); // Paused from watering state
     assert!(wizard_mode.paused_state.is_some());
     assert!(state_machine.cycle.is_none());

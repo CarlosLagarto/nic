@@ -1,24 +1,18 @@
-use crate::watering::api::get_state;
-use crate::watering::api::send_command;
 use axum::routing::post;
 use axum::{routing::get, Router};
 use axum_server::Server;
-use db::Database;
-use watering::api::get_cycle;
-use watering::interface::RealSensorController;
+use nic::api::{
+    get_cycle, get_state, send_command, switch_to_auto, switch_to_manual, switch_to_wizard,
+};
+use nic::db::Database;
+use nic::watering::ds::AppState;
+use nic::watering::ds::ControlSignal;
+use nic::watering::interface::RealSensorController;
+use nic::watering::state_machine::run_watering_system;
+use nic::weather;
 use std::{error::Error, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
-use watering::api::{switch_to_auto, switch_to_manual, switch_to_wizard};
-use watering::ds::AppState;
-use watering::ds::ControlSignal;
-use watering::state_machine::run_watering_system;
-
-mod db;
-#[cfg(test)]
-mod tests;
-mod watering;
-mod weather;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

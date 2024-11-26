@@ -3,9 +3,15 @@ use std::sync::Arc;
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 
-use super::{ds::{AppState, WateringState}, interface::SensorController, mode::ModeEnum};
+use crate::watering::{
+    ds::{AppState, WateringState},
+    interface::SensorController,
+    mode::ModeEnum,
+};
 
-pub async fn switch_to_auto<C: SensorController>(app_state: State<Arc<AppState<C>>>) -> Json<&'static str> {
+pub async fn switch_to_auto<C: SensorController>(
+    app_state: State<Arc<AppState<C>>>,
+) -> Json<&'static str> {
     let auto_mode = app_state.watering_system.auto_mode.read().await.clone();
     app_state
         .watering_system
@@ -14,7 +20,9 @@ pub async fn switch_to_auto<C: SensorController>(app_state: State<Arc<AppState<C
     Json("Switched to Auto Mode")
 }
 
-pub async fn switch_to_manual<C: SensorController>(app_state: State<Arc<AppState<C>>>) -> Json<&'static str> {
+pub async fn switch_to_manual<C: SensorController>(
+    app_state: State<Arc<AppState<C>>>,
+) -> Json<&'static str> {
     let manual_mode = app_state.watering_system.manual_mode.read().await.clone();
     app_state
         .watering_system
@@ -23,7 +31,9 @@ pub async fn switch_to_manual<C: SensorController>(app_state: State<Arc<AppState
     Json("Switched to Manual Mode")
 }
 
-pub async fn switch_to_wizard<C: SensorController>(app_state: State<Arc<AppState<C>>>) -> Json<&'static str> {
+pub async fn switch_to_wizard<C: SensorController>(
+    app_state: State<Arc<AppState<C>>>,
+) -> Json<&'static str> {
     let wizard_mode = app_state.watering_system.wizard_mode.read().await.clone();
     app_state
         .watering_system
@@ -42,7 +52,6 @@ pub struct WateringStateResponse {
 pub async fn get_state<C: SensorController>(
     State(app_state): State<Arc<AppState<C>>>,
 ) -> Json<WateringStateResponse> {
-    // Read the current mode
     let active_mode = app_state.watering_system.active_mode.read().await;
     let mode = match &*active_mode {
         ModeEnum::Auto(_) => "Auto".to_string(),
@@ -50,7 +59,6 @@ pub async fn get_state<C: SensorController>(
         ModeEnum::Wizard(_) => "Wizard".to_string(),
     };
 
-    // Read the current state of the machine
     let state_machine = app_state.watering_system.state_machine.read().await;
     let state = match state_machine.state {
         WateringState::Idle => "Idle".to_string(),
@@ -59,11 +67,12 @@ pub async fn get_state<C: SensorController>(
         WateringState::Deactivating(sector) => format!("Deactivating sector {}", sector),
     };
 
-    // Retrieve the active cycle (if any)
-    let current_cycle = state_machine
-        .cycle
-        .as_ref()
-        .map(|cycle| format!("Cycle ID: {}, Instructions: {:?}", cycle.id, cycle.instructions));
+    let current_cycle = state_machine.cycle.as_ref().map(|cycle| {
+        format!(
+            "Cycle ID: {}, Instructions: {:?}",
+            cycle.id, cycle.instructions
+        )
+    });
 
     Json(WateringStateResponse {
         mode,
@@ -72,16 +81,13 @@ pub async fn get_state<C: SensorController>(
     })
 }
 
-// pub async fn query_state(State(_app_state): State<Arc<AppState>>) -> String {
-//     // Return current watering system state
-//     "Current state information".to_string()
-// }
-
-pub async fn send_command<C: SensorController>(State(_app_state): State<Arc<AppState<C>>>) -> String {
+pub async fn send_command<C: SensorController>(
+    State(_app_state): State<Arc<AppState<C>>>,
+) -> String {
     // Parse command and modify system state
+    // TODO:
     "Command received".to_string()
 }
-
 
 #[derive(Serialize, Deserialize)]
 pub struct CycleResponse {
@@ -89,8 +95,9 @@ pub struct CycleResponse {
     pub instructions: Option<Vec<(u32, String)>>, // Instruction details: sector and duration
 }
 
-pub async fn get_cycle<C: SensorController>(State(app_state): State<Arc<AppState<C>>>) -> Json<CycleResponse> {
-    // Read the current cycle
+pub async fn get_cycle<C: SensorController>(
+    State(app_state): State<Arc<AppState<C>>>,
+) -> Json<CycleResponse> {
     let state_machine = app_state.watering_system.state_machine.read().await;
 
     if let Some(cycle) = &state_machine.cycle {
@@ -98,10 +105,7 @@ pub async fn get_cycle<C: SensorController>(State(app_state): State<Arc<AppState
             .instructions
             .iter()
             .map(|(sector_id, duration)| {
-                (
-                    *sector_id,
-                    format!("{} minutes", duration.num_minutes()), // Convert duration to readable format
-                )
+                (*sector_id, format!("{} minutes", duration.num_minutes()))
             })
             .collect();
 

@@ -1,6 +1,5 @@
-use reqwest;
 use async_trait::async_trait;
-
+use reqwest;
 
 #[async_trait]
 pub trait SensorController: Send + Sync {
@@ -30,5 +29,3 @@ impl SensorController for RealSensorController {
         }
     }
 }
-
-

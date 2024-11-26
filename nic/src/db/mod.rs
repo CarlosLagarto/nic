@@ -4,8 +4,6 @@ use rusqlite::{params, Connection, Result, ToSql};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
-pub mod mock;
-
 pub enum DatabaseCommand {
     Execute {
         query: String,
@@ -281,6 +279,7 @@ pub fn log_watering_event(conn: &Connection, evt: WateringEvent) -> Result<()> {
 }
 
 pub fn get_current_weather() -> Option<WeatherConditions> {
+    // TODO:
     // Simulate retrieving weather conditions
     // Replace with actual database or API query
     Some(WeatherConditions {

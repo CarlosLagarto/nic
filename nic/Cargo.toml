@@ -23,3 +23,11 @@ tokio = { version = "1", features = ["full"] }
 tower = "0.5.1"
 hyper = { version = "1.5.1", features = ["full"] }
 mockall = "0.13.1"
+
+[profile.release]
+lto = true
+
+[lib]
+name = "nic"          
+path = "src/lib.rs"  
+crate-type = ["rlib"]

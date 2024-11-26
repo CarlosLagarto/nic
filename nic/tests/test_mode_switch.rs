@@ -1,14 +1,17 @@
-use crate::{
-    db::mock::MockDatabase,
-    tests::mock_sensors::set_sensor_controller,
-    watering::{ds::AppState, mode::ModeEnum},
+use nic::watering::mode::ModeEnum;
+
+#[path = "common/mod.rs"]
+mod common;
+use crate::common::{
+    mock_db::{new_with_mock, MockDatabase},
+    mock_sensors::set_sensor_controller,
 };
 
 #[tokio::test]
 async fn test_mode_switching() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     assert!(matches!(
         *app_state.watering_system.active_mode.read().await,
@@ -31,7 +34,7 @@ async fn test_mode_switching() {
 async fn test_all_mode_transitions() {
     let db = MockDatabase::new();
     let controller = set_sensor_controller();
-    let app_state = AppState::new_with_mock(db, controller).await;
+    let app_state = new_with_mock(db, controller).await;
 
     // Initially in Auto mode
     assert!(matches!(

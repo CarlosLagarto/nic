@@ -1,6 +1,5 @@
+use nic::watering::ds::{ControlSignal, EnvironmentalSignal};
 use tokio::sync::broadcast::{self};
-
-use crate::watering::ds::{ControlSignal, EnvironmentalSignal};
 
 #[tokio::test]
 async fn test_rapid_signals() {
