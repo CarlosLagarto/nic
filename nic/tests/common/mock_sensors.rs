@@ -1,10 +1,9 @@
 use axum::async_trait;
 // use futures_util::FutureExt;
 use mockall::mock;
-use nic::watering::interface::SensorController;
+use nic::sensors::interface::SensorController;
 use std::sync::Arc;
 
-// Mocking the trait
 mock! {
     pub SensorController {}
 

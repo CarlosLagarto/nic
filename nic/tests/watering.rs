@@ -2,11 +2,10 @@ use chrono::NaiveTime;
 
 use async_trait::async_trait;
 use mockall::mock;
-use nic::watering::{
+use nic::{sensors::interface::SensorController, watering::{
     ds::{Cycle, SectorInfo, WateringState},
-    interface::SensorController,
     schedule::AllowedTimeframe,
-};
+}};
 
 #[path = "common/mod.rs"]
 mod common;

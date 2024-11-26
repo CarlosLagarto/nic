@@ -3,10 +3,12 @@ use std::sync::Arc;
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 
-use crate::watering::{
-    ds::{AppState, EventType, WateringState},
-    interface::SensorController,
-    mode::ModeEnum,
+use crate::{
+    sensors::interface::SensorController,
+    watering::{
+        ds::{AppState, EventType, WateringState},
+        mode::ModeEnum,
+    },
 };
 
 pub async fn switch_to_auto<C: SensorController>(
@@ -63,7 +65,11 @@ pub async fn get_state<C: SensorController>(
     let state = match state_machine.state {
         WateringState::Idle => "Idle".to_string(),
         WateringState::Activating(sector) => format!("Activating sector {}", sector),
-        WateringState::Watering(sector, duration) => format!("Watering sector {} for {} minutes", sector, duration.num_minutes()),
+        WateringState::Watering(sector, duration) => format!(
+            "Watering sector {} for {} minutes",
+            sector,
+            duration.num_minutes()
+        ),
         WateringState::Deactivating(sector) => format!("Deactivating sector {}", sector),
     };
 

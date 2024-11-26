@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use super::{
-    interface::SensorController, mode_auto::ModeAuto, mode_manual::ModeManual,
-    mode_wizard::ModeWizard, state_machine::WateringStateMachine,
+    mode_auto::ModeAuto, mode_manual::ModeManual, mode_wizard::ModeWizard,
+    state_machine::WateringStateMachine,
 };
-use crate::db::Database;
+use crate::{db::Database, sensors::interface::SensorController};
 use chrono::NaiveTime;
 
 #[derive(Clone, Debug)]

@@ -3,8 +3,8 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
 use nic::db::{Database, DatabaseCommand};
+use nic::sensors::interface::SensorController;
 use nic::watering::ds::{AppState, Cycle, SectorInfo, WeatherConditions};
-use nic::watering::interface::SensorController;
 use nic::watering::state_machine::WateringSystem;
 
 pub async fn new_with_mock<C: SensorController>(

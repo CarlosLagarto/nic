@@ -2,11 +2,10 @@ use std::sync::Arc;
 
 use super::{
     ds::{Cycle, EventType, WateringState},
-    interface::SensorController,
     schedule::AllowedTimeframe,
     state_machine::WateringStateMachine,
 };
-use crate::db::Database;
+use crate::{db::Database, sensors::interface::SensorController};
 use chrono::NaiveTime;
 
 #[derive(Clone, Debug)]

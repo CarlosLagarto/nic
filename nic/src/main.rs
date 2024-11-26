@@ -5,9 +5,9 @@ use nic::api::{
     get_cycle, get_state, send_command, switch_to_auto, switch_to_manual, switch_to_wizard,
 };
 use nic::db::Database;
+use nic::sensors::interface::RealSensorController;
 use nic::watering::ds::AppState;
 use nic::watering::ds::ControlSignal;
-use nic::watering::interface::RealSensorController;
 use nic::watering::state_machine::run_watering_system;
 use nic::weather;
 use std::{error::Error, sync::Arc};

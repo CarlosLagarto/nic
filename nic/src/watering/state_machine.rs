@@ -2,14 +2,13 @@ use std::{sync::Arc, time::Duration};
 
 use super::{
     ds::{AppState, ControlSignal, Cycle, EventType, WateringState},
-    interface::SensorController,
     mode::ModeEnum,
     mode_auto::ModeAuto,
     mode_manual::ModeManual,
     mode_wizard::ModeWizard,
     schedule::AllowedTimeframe,
 };
-use crate::{db::Database, watering::ds::WateringEvent};
+use crate::{db::Database, sensors::interface::SensorController, watering::ds::WateringEvent};
 use chrono::{Local, NaiveTime};
 use tokio::sync::{broadcast, Mutex, RwLock};
 

@@ -1,5 +1,5 @@
-use super::{interface::SensorController, state_machine::WateringSystem};
-use crate::db::Database;
+use super::state_machine::WateringSystem;
+use crate::{db::Database, sensors::interface::SensorController};
 
 use chrono::Duration;
 use std::sync::Arc;
@@ -24,10 +24,10 @@ pub struct Cycle {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WateringState {
-    Idle,              // No active watering
-    Activating(u32),   // Activating a sector
+    Idle,                            // No active watering
+    Activating(u32),                 // Activating a sector
     Watering(u32, chrono::Duration), // Actively watering (sector ID, duration)
-    Deactivating(u32), // Deactivating a sector
+    Deactivating(u32),               // Deactivating a sector
 }
 
 #[derive(Debug, Clone)]

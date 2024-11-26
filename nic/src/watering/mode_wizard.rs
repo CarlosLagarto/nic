@@ -2,11 +2,14 @@ use std::sync::Arc;
 
 use super::{
     ds::{EnvironmentalSignal, SectorInfo, WateringState},
-    interface::SensorController,
     schedule::AllowedTimeframe,
     state_machine::WateringStateMachine,
 };
-use crate::{db::Database, watering::ds::{Cycle, EventType}};
+use crate::{
+    db::Database,
+    sensors::interface::SensorController,
+    watering::ds::{Cycle, EventType},
+};
 use chrono::{Duration, NaiveTime};
 
 #[derive(Clone, Debug)]
@@ -145,7 +148,9 @@ impl ModeWizard {
         }
 
         if state_machine.cycle.is_some() {
-            state_machine.update(db.clone(),EventType::Wizard , controller).await;
+            state_machine
+                .update(db.clone(), EventType::Wizard, controller)
+                .await;
         }
     }
 

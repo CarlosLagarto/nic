@@ -2,7 +2,7 @@ use axum::{extract::State, Json};
 
 use std::sync::Arc;
 
-use crate::watering::{ds::AppState, interface::SensorController};
+use crate::{sensors::interface::SensorController, watering::ds::AppState};
 
 pub async fn list_devices<C: SensorController>(
     State(_app_state): State<Arc<AppState<C>>>,

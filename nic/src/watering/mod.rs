@@ -1,5 +1,4 @@
 pub mod ds;
-pub mod interface;
 pub mod mode;
 pub mod mode_auto;
 pub mod mode_manual;

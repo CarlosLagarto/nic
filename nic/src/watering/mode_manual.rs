@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use super::{
     ds::{Cycle, EventType, WateringState},
-    interface::SensorController,
     state_machine::WateringStateMachine,
 };
-use crate::db::Database;
+use crate::{db::Database, sensors::interface::SensorController};
 
 #[derive(Clone, Debug)]
 pub struct ModeManual {
@@ -31,6 +30,8 @@ impl ModeManual {
             println!("Manual Mode: Starting manual cycle.");
             state_machine.start_cycle(self.cycle.clone());
         }
-        state_machine.update(db, EventType::Manual, controller).await;
+        state_machine
+            .update(db, EventType::Manual, controller)
+            .await;
     }
 }

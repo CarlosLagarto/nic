@@ -1,4 +1,6 @@
-use crate::common::{
+#[path = "../common/mod.rs"]
+mod common;
+use common::{
     mock_db::{new_with_mock, MockDatabase},
     mock_sensors::set_sensor_controller,
 };
