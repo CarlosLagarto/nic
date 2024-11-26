@@ -26,7 +26,7 @@ pub struct Cycle {
 pub enum WateringState {
     Idle,              // No active watering
     Activating(u32),   // Activating a sector
-    Watering(u32),     // Currently watering a sector
+    Watering(u32, chrono::Duration), // Actively watering (sector ID, duration)
     Deactivating(u32), // Deactivating a sector
 }
 
@@ -75,7 +75,7 @@ pub struct WateringEvent {
     pub start_time: String,
     pub duration: Duration,
     pub water_applied: f64,
-    pub event_type: String,
+    pub event_type: EventType,
 }
 
 impl WateringEvent {
@@ -85,7 +85,7 @@ impl WateringEvent {
         start_time: String,
         duration: Duration,
         water_applied: f64,
-        event_type: String,
+        event_type: EventType,
     ) -> Self {
         Self {
             cycle_id,
@@ -94,6 +94,23 @@ impl WateringEvent {
             duration,
             water_applied,
             event_type,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventType {
+    Auto,
+    Manual,
+    Wizard,
+}
+
+impl ToString for EventType {
+    fn to_string(&self) -> String {
+        match self {
+            EventType::Auto => "auto".to_string(),
+            EventType::Manual => "manual".to_string(),
+            EventType::Wizard => "wizard".to_string(),
         }
     }
 }

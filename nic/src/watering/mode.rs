@@ -15,7 +15,7 @@ pub enum ModeEnum {
 }
 
 impl ModeEnum {
-    pub async fn execute<C: SensorController>(
+    pub async fn execute<C: SensorController + 'static>(
         &mut self,
         state_machine: &mut WateringStateMachine,
         db: Database,

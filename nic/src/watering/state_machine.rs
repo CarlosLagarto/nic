@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use super::{
-    ds::{AppState, ControlSignal, Cycle, WateringState},
+    ds::{AppState, ControlSignal, Cycle, EventType, WateringState},
     interface::SensorController,
     mode::ModeEnum,
     mode_auto::ModeAuto,
@@ -166,10 +166,10 @@ impl WateringStateMachine {
         self.state = WateringState::Idle;
     }
 
-    pub async fn update<C: SensorController>(
+    pub async fn update<C: SensorController+ 'static>(
         &mut self,
         db: Database,
-        event_type: &str,
+        event_type: EventType,
         controller: &Arc<C>,
     ) {
         if let Some(cycle) = &self.cycle {
@@ -189,23 +189,31 @@ impl WateringStateMachine {
                 }
                 WateringState::Activating(_) => {
                     println!("Watering sector {} for {:?}", sector_id, duration);
-                    self.state = WateringState::Watering(sector_id);
+                    self.state = WateringState::Watering(sector_id, duration);
 
-                    // simulate watering
-                    std::thread::sleep(std::time::Duration::from_secs(
-                        duration.num_seconds() as u64
-                    ));
+                    let controller_clone = controller.clone();
+                    let db_clone = db.clone();
+                    let sector_id_clone = sector_id;
+                    let duration_clone = duration;
+                    tokio::spawn(async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(
+                            duration_clone.num_seconds() as u64,
+                        ))
+                        .await;
 
-                    let water_applied = (duration.num_minutes() as f64 / 60.0) * 2.5;
-                    _ = db.log_watering_event(WateringEvent::new(
-                        Some(cycle.id),
-                        sector_id,
-                        chrono::Local::now().to_rfc3339(),
-                        duration,
-                        water_applied,
-                        event_type.to_owned(),
-                    ));
-                    self.state = WateringState::Deactivating(sector_id);
+                        println!("Completed watering for sector {}", sector_id_clone);
+                        let water_applied = (duration_clone.num_minutes() as f64 / 60.0) * 2.5;
+                        _ = db_clone.log_watering_event(WateringEvent::new(
+                            None, // Use proper cycle ID if needed
+                            sector_id_clone,
+                            chrono::Local::now().to_rfc3339(),
+                            duration_clone,
+                            water_applied,
+                            event_type,
+                        ));
+
+                        controller_clone.deactivate_sector(sector_id_clone).await;
+                    });
                 }
                 WateringState::Deactivating(_) => {
                     println!("Deactivating sector {}", sector_id);

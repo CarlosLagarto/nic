@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{
-    ds::{Cycle, WateringState},
+    ds::{Cycle, EventType, WateringState},
     interface::SensorController,
     state_machine::WateringStateMachine,
 };
@@ -17,7 +17,7 @@ impl ModeManual {
         Self { cycle }
     }
 
-    pub async fn execute<C: SensorController>(
+    pub async fn execute<C: SensorController + 'static>(
         &mut self,
         state_machine: &mut WateringStateMachine,
         db: Database,
@@ -31,6 +31,6 @@ impl ModeManual {
             println!("Manual Mode: Starting manual cycle.");
             state_machine.start_cycle(self.cycle.clone());
         }
-        state_machine.update(db, "Manual", controller).await;
+        state_machine.update(db, EventType::Manual, controller).await;
     }
 }

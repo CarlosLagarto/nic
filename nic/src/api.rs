@@ -4,7 +4,7 @@ use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 
 use crate::watering::{
-    ds::{AppState, WateringState},
+    ds::{AppState, EventType, WateringState},
     interface::SensorController,
     mode::ModeEnum,
 };
@@ -54,16 +54,16 @@ pub async fn get_state<C: SensorController>(
 ) -> Json<WateringStateResponse> {
     let active_mode = app_state.watering_system.active_mode.read().await;
     let mode = match &*active_mode {
-        ModeEnum::Auto(_) => "Auto".to_string(),
-        ModeEnum::Manual(_) => "Manual".to_string(),
-        ModeEnum::Wizard(_) => "Wizard".to_string(),
+        ModeEnum::Auto(_) => EventType::Auto,
+        ModeEnum::Manual(_) => EventType::Manual,
+        ModeEnum::Wizard(_) => EventType::Wizard,
     };
 
     let state_machine = app_state.watering_system.state_machine.read().await;
     let state = match state_machine.state {
         WateringState::Idle => "Idle".to_string(),
         WateringState::Activating(sector) => format!("Activating sector {}", sector),
-        WateringState::Watering(sector) => format!("Watering sector {}", sector),
+        WateringState::Watering(sector, duration) => format!("Watering sector {} for {} minutes", sector, duration.num_minutes()),
         WateringState::Deactivating(sector) => format!("Deactivating sector {}", sector),
     };
 
@@ -75,7 +75,7 @@ pub async fn get_state<C: SensorController>(
     });
 
     Json(WateringStateResponse {
-        mode,
+        mode: mode.to_string(),
         state,
         current_cycle,
     })

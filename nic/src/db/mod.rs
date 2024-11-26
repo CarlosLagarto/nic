@@ -272,7 +272,7 @@ pub fn log_watering_event(conn: &Connection, evt: WateringEvent) -> Result<()> {
             evt.start_time,
             evt.duration.num_minutes(),
             evt.water_applied,
-            evt.event_type
+            evt.event_type.to_string()
         ],
     )?;
     Ok(())

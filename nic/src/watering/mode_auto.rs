@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{
-    ds::{Cycle, WateringState},
+    ds::{Cycle, EventType, WateringState},
     interface::SensorController,
     schedule::AllowedTimeframe,
     state_machine::WateringStateMachine,
@@ -20,7 +20,7 @@ impl ModeAuto {
         Self { cycle, timeframe }
     }
 
-    pub async fn execute<C: SensorController>(
+    pub async fn execute<C: SensorController + 'static>(
         &mut self,
         state_machine: &mut WateringStateMachine,
         db: Database,
@@ -41,6 +41,6 @@ impl ModeAuto {
             println!("Auto Mode: Starting auto cycle.");
             state_machine.start_cycle(self.cycle.clone());
         }
-        state_machine.update(db, "Auto", controller).await;
+        state_machine.update(db, EventType::Auto, controller).await;
     }
 }

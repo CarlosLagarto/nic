@@ -6,7 +6,7 @@ use super::{
     schedule::AllowedTimeframe,
     state_machine::WateringStateMachine,
 };
-use crate::{db::Database, watering::ds::Cycle};
+use crate::{db::Database, watering::ds::{Cycle, EventType}};
 use chrono::{Duration, NaiveTime};
 
 #[derive(Clone, Debug)]
@@ -96,7 +96,7 @@ impl ModeWizard {
         }
     }
 
-    pub async fn execute<C: SensorController>(
+    pub async fn execute<C: SensorController + 'static>(
         &mut self,
         state_machine: &mut WateringStateMachine,
         db: Database,
@@ -145,7 +145,7 @@ impl ModeWizard {
         }
 
         if state_machine.cycle.is_some() {
-            state_machine.update(db.clone(), "Wizard", controller).await;
+            state_machine.update(db.clone(),EventType::Wizard , controller).await;
         }
     }
 
