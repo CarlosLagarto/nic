@@ -1,5 +1,5 @@
 use super::state_machine::WateringSystem;
-use crate::db::Database;
+use crate::db::{mock::MockDatabase, Database};
 use chrono::Duration;
 use std::sync::Arc;
 #[derive(Debug, Clone)]
@@ -66,6 +66,13 @@ impl AppState {
         })
     }
 
+    pub async fn new_with_mock(db: MockDatabase) -> Arc<Self> {
+        let watering_system = WateringSystem::new().await;
+        Arc::new(AppState {
+            db: Database { sender: db.sender.clone() }, // Use the mock database sender
+            watering_system,
+        })
+    }
 }
 
 #[derive(Debug)]

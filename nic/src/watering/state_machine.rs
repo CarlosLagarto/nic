@@ -211,3 +211,29 @@ impl WateringStateMachine {
         }
     }
 }
+
+
+#[cfg(test)]
+mod state_machine_tests {
+    use super::*;
+    use chrono::Duration;
+
+    #[test]
+    fn test_start_cycle() {
+        let timeframe = AllowedTimeframe {
+            start: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+            end: NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
+        };
+        let mut state_machine = WateringStateMachine::new(timeframe);
+
+        let cycle = Cycle {
+            id: 1,
+            instructions: vec![(1, Duration::minutes(30))],
+        };
+        state_machine.start_cycle(cycle.clone());
+
+        assert_eq!(state_machine.cycle, Some(cycle));
+        assert_eq!(state_machine.current_instruction, 0);
+        assert_eq!(state_machine.state, WateringState::Idle);
+    }
+}

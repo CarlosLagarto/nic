@@ -2,15 +2,17 @@ use axum::routing::post;
 use axum::{routing::get, Router};
 use axum_server::Server;
 use db::Database;
-use watering::api::{switch_to_auto, switch_to_manual, switch_to_wizard};
-use watering::state_machine::run_watering_system;
 use std::{error::Error, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
+use watering::api::{switch_to_auto, switch_to_manual, switch_to_wizard};
 use watering::ds::AppState;
 use watering::ds::ControlSignal;
+use watering::state_machine::run_watering_system;
 
 mod db;
+#[cfg(test)]
+mod tests;
 mod watering;
 mod weather;
 
@@ -21,11 +23,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Broadcast channel for real-time updates
     let (tx, rx) = broadcast::channel::<ControlSignal>(100);
     let tx = Arc::new(tx);
-    let rx = Arc::new(Mutex::new(rx)); 
+    let rx = Arc::new(Mutex::new(rx));
 
     let app_state = AppState::new(db.clone()).await;
 
-    // Start monitoring tasks
     tokio::spawn(weather::mqtt_mon::monitor_mqtt(tx.clone()));
     tokio::spawn(weather::mqtt_mon::monitor_udp(tx.clone(), db.clone()));
 

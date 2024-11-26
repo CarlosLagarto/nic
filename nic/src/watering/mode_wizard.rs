@@ -207,3 +207,59 @@ impl ModeWizard {
             .and_modify(|progress| *progress += water_applied);
     }
 }
+
+#[cfg(test)]
+mod mode_wizard_tests {
+    use super::*;
+    use chrono::{Duration, NaiveTime};
+
+    fn mock_sector(
+        id: u32,
+        weekly_target: f64,
+        sprinkler_debit: f64,
+        max_duration: Duration,
+    ) -> SectorInfo {
+        SectorInfo {
+            id,
+            weekly_target,
+            sprinkler_debit,
+            percolation_rate: 0.5, // Mock value
+            max_duration,
+        }
+    }
+
+    #[test]
+    fn test_calculate_irrigation_time() {
+        let sector = mock_sector(1, 2.5, 1.0, Duration::minutes(30));
+        let timeframe = AllowedTimeframe {
+            start: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+            end: NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
+        };
+        let wizard = ModeWizard::new(vec![sector.clone()], timeframe);
+
+        // No progress yet
+        let result = wizard.calculate_irrigation_time(&sector);
+        assert_eq!(result, Some(Duration::minutes(30))); // 2.5 cm at 1.0 cm/hour  
+    }
+
+    #[test]
+    fn test_handle_signal_pause_resume() {
+        let timeframe = AllowedTimeframe {
+            start: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+            end: NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
+        };
+        let mut wizard = ModeWizard::new(vec![], timeframe.clone());
+
+        let mut state_machine = WateringStateMachine::new(timeframe);
+        state_machine.start_cycle(Cycle {
+            id: 1,
+            instructions: vec![(1, Duration::minutes(30))],
+        });
+
+        wizard.handle_signal(EnvironmentalSignal::RainStart, &mut state_machine);
+        assert_eq!(state_machine.state, WateringState::Idle);
+
+        wizard.handle_signal(EnvironmentalSignal::RainStop, &mut state_machine);
+        assert!(state_machine.cycle.is_some());
+    }
+}

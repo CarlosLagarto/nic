@@ -1,9 +1,10 @@
 use crate::watering::ds::{Cycle, SectorInfo, WateringEvent, WeatherConditions};
 use chrono::Duration;
 use rusqlite::{params, Connection, Result, ToSql};
-
 use std::sync::mpsc::{self, Sender};
 use std::thread;
+
+pub mod mock;
 
 pub enum DatabaseCommand {
     Execute {
