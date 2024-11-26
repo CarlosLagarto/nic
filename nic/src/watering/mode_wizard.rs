@@ -178,16 +178,18 @@ impl ModeWizard {
             None // No watering needed; target met
         } else {
             // Time needed to apply the remaining water (in minutes)
-            let irrigation_time_minutes = (remaining / sector.sprinkler_debit) * 60.0;
+            // remaining in cm / (debit in cm / hora)
+            let irrigation_time_seconds = ((remaining / sector.sprinkler_debit) * 60.0) * 60.;
 
             // Maximum time the soil can absorb water without runoff
-            let max_percolation_time_minutes =
-                (sector.percolation_rate / sector.sprinkler_debit) * 60.0;
+            // we convert the mm/hour to cm / hour
+            let max_percolation_time_seconds =
+                (((sector.percolation_rate * 10.) / sector.sprinkler_debit) * 60.0) * 60.;
 
             // Final duration is the minimum of required, percolation-limited, and max safe duration
-            let irrigation_duration = Duration::minutes(irrigation_time_minutes.ceil() as i64);
+            let irrigation_duration = Duration::seconds(irrigation_time_seconds.ceil() as i64);
             let percolation_duration =
-                Duration::minutes(max_percolation_time_minutes.ceil() as i64);
+                Duration::minutes(max_percolation_time_seconds.ceil() as i64);
 
             Some(
                 irrigation_duration
@@ -199,7 +201,7 @@ impl ModeWizard {
 
     /// Update progress for a sector after watering
     fn update_progress(&mut self, sector_id: u32, duration: Duration, sector: &SectorInfo) {
-        let water_applied = (duration.num_minutes() as f64 / 60.0) * sector.sprinkler_debit;
+        let water_applied = (duration.num_seconds() as f64 * 60.0) * sector.sprinkler_debit;
         self.progress
             .entry(sector_id)
             .and_modify(|progress| *progress += water_applied);

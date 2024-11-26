@@ -9,7 +9,6 @@ use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 use watering::ds::AppState;
 use watering::ds::ControlSignal;
-use watering::state_machine::WateringSystem;
 
 mod db;
 mod watering;
@@ -22,14 +21,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Broadcast channel for real-time updates
     let (tx, rx) = broadcast::channel::<ControlSignal>(100);
     let tx = Arc::new(tx);
-    let rx = Arc::new(Mutex::new(rx)); // Wrap in Mutex for safe access across tasks
+    let rx = Arc::new(Mutex::new(rx)); 
 
-    // Initialize watering state machine and modes
-    let watering_system = WateringSystem::new().await;
-    let app_state = Arc::new(AppState {
-        db: db.clone(),
-        watering_system: Arc::new(watering_system),
-    });
+    let app_state = AppState::new(db.clone()).await;
 
     // Start monitoring tasks
     tokio::spawn(weather::mqtt_mon::monitor_mqtt(tx.clone()));

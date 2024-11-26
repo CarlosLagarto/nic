@@ -27,7 +27,7 @@ pub struct WateringSystem {
 }
 
 impl WateringSystem {
-    pub async fn new() -> Self {
+    pub async fn new() -> Arc<Self> {
         let timeframe = AllowedTimeframe {
             start: NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
             end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
@@ -40,13 +40,13 @@ impl WateringSystem {
         let manual_mode = ModeManual::new(Cycle::default());
         let wizard_mode = ModeWizard::new(vec![], timeframe);
 
-        WateringSystem {
+        Arc::new(WateringSystem {
             state_machine: Arc::new(RwLock::new(state_machine)),
             auto_mode: Arc::new(RwLock::new(auto_mode.clone())),
             manual_mode: Arc::new(RwLock::new(manual_mode)),
             wizard_mode: Arc::new(RwLock::new(wizard_mode)),
             active_mode: Arc::new(RwLock::new(ModeEnum::Auto(auto_mode))),
-        }
+        })
     }
 
     pub async fn switch_mode(&self, new_mode: ModeEnum) {
