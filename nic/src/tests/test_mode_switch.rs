@@ -1,14 +1,14 @@
-use std::sync::Arc;
-
 use crate::{
     db::mock::MockDatabase,
+    tests::mock_sensors::set_sensor_controller,
     watering::{ds::AppState, mode::ModeEnum},
 };
 
 #[tokio::test]
 async fn test_mode_switching() {
     let db = MockDatabase::new();
-    let app_state = Arc::new(AppState::new_with_mock(db).await);
+    let controller = set_sensor_controller();
+    let app_state = AppState::new_with_mock(db, controller).await;
 
     assert!(matches!(
         *app_state.watering_system.active_mode.read().await,
@@ -30,7 +30,8 @@ async fn test_mode_switching() {
 #[tokio::test]
 async fn test_all_mode_transitions() {
     let db = MockDatabase::new();
-    let app_state = Arc::new(AppState::new_with_mock(db).await);
+    let controller = set_sensor_controller();
+    let app_state = AppState::new_with_mock(db, controller).await;
 
     // Initially in Auto mode
     assert!(matches!(

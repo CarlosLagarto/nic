@@ -1,7 +1,11 @@
+use crate::watering::api::get_state;
+use crate::watering::api::send_command;
 use axum::routing::post;
 use axum::{routing::get, Router};
 use axum_server::Server;
 use db::Database;
+use watering::api::get_cycle;
+use watering::interface::RealSensorController;
 use std::{error::Error, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
@@ -24,8 +28,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (tx, rx) = broadcast::channel::<ControlSignal>(100);
     let tx = Arc::new(tx);
     let rx = Arc::new(Mutex::new(rx));
-
-    let app_state = AppState::new(db.clone()).await;
+    let controller = Arc::new(RealSensorController {});
+    let app_state = AppState::new(db.clone(), controller).await;
 
     tokio::spawn(weather::mqtt_mon::monitor_mqtt(tx.clone()));
     tokio::spawn(weather::mqtt_mon::monitor_udp(tx.clone(), db.clone()));
@@ -33,11 +37,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app = Router::new()
         .route("/devices", get(weather::api::list_devices))
         .route("/weather", get(weather::api::query_weather))
-        .route("/state", get(watering::query_state))
+        .route("/state", get(get_state))
+        .route("/state", get(get_cycle))
         .route("/switch/auto", post(switch_to_auto))
         .route("/switch/manual", post(switch_to_manual))
         .route("/switch/wizard", post(switch_to_wizard))
-        .route("/command", get(watering::send_command)) // Example: command=stop or command=auto
+        .route("/command", get(send_command)) // Example: command=stop or command=auto
         .with_state(app_state.clone());
 
     // Start watering system loop

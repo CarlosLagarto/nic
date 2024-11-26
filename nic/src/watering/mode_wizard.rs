@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use super::{
     ds::{EnvironmentalSignal, SectorInfo, WateringState},
+    interface::SensorController,
     schedule::AllowedTimeframe,
     state_machine::WateringStateMachine,
 };
@@ -11,7 +14,7 @@ pub struct ModeWizard {
     pub sectors: Vec<SectorInfo>,
     pub progress: std::collections::HashMap<u32, f64>,
     pub paused_state: Option<(WateringState, Cycle, usize)>, // Track paused state
-    timeframe: AllowedTimeframe,
+    pub timeframe: AllowedTimeframe,
 }
 
 impl ModeWizard {
@@ -72,7 +75,7 @@ impl ModeWizard {
         println!("WizardMode: Performing periodic updates...");
 
         // Check weather conditions and log any changes
-        if !self.check_weather_conditions(db.clone()) {
+        if !self.valid_weather_conditions(db.clone()) {
             println!("WizardMode: Weather conditions unsuitable for watering.");
             return;
         }
@@ -93,23 +96,21 @@ impl ModeWizard {
         }
     }
 
-    pub async fn execute(
+    pub async fn execute<C: SensorController>(
         &mut self,
         state_machine: &mut WateringStateMachine,
         db: Database,
         current_time: NaiveTime,
+        controller: &Arc<C>,
     ) {
-        if state_machine.state == WateringState::Idle {
-            println!("Wizard Mode: Machine is stopped. Skipping execution.");
-            return;
-        }
         if !self.timeframe.is_within(current_time) {
             println!(
-                "Wizard Mode: Current time is outside the allowed timeframe. Skipping watering."
+                "Wizard Mode: Current time ({:?}) is outside the allowed timeframe. Skipping watering.",
+                current_time
             );
             return;
         }
-        if self.check_weather_conditions(db.clone()) {
+        if !self.valid_weather_conditions(db.clone()) {
             println!("Unsuitable weather conditions. Skipping watering.");
             return;
         }
@@ -132,7 +133,8 @@ impl ModeWizard {
                     };
 
                     state_machine.start_cycle(cycle);
-                    state_machine.update(db.clone(), "Wizard").await;
+
+                    // Update progress immediately for the scheduled sector
                     self.update_progress(sector.id, duration, &sector);
                 } else {
                     println!(
@@ -142,9 +144,14 @@ impl ModeWizard {
                 }
             }
         }
+
+        if state_machine.cycle.is_some() {
+            state_machine.update(db.clone(), "Wizard", controller).await;
+            // self.update_progress(sector.id, duration, &sector);
+        }
     }
 
-    pub fn check_weather_conditions(&self, db: Database) -> bool {
+    pub fn valid_weather_conditions(&self, db: Database) -> bool {
         // Simulate a weather check
         // In practice, this might query a database or external API
         println!("Wizard Mode: Checking weather conditions...");

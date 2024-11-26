@@ -1,4 +1,4 @@
-use super::state_machine::WateringSystem;
+use super::{interface::SensorController, state_machine::WateringSystem};
 use crate::db::{mock::MockDatabase, Database};
 use chrono::Duration;
 use std::sync::Arc;
@@ -53,22 +53,22 @@ pub struct WeatherConditions {
 }
 
 
-pub struct AppState {
+pub struct AppState<C: SensorController> {
     pub db: Database,
-    pub watering_system: Arc<WateringSystem>,
+    pub watering_system: Arc<WateringSystem<C>>,
 }
 
-impl AppState {
-    pub async fn new(db: Database) -> Arc<Self> {
-        let watering_system = WateringSystem::new().await;
+impl<C: SensorController> AppState<C> {
+    pub async fn new(db: Database, controler: Arc<C>) -> Arc<Self> {
+        let watering_system = WateringSystem::new(controler).await;
         Arc::new(AppState {
             db,
             watering_system,
         })
     }
 
-    pub async fn new_with_mock(db: MockDatabase) -> Arc<Self> {
-        let watering_system = WateringSystem::new().await;
+    pub async fn new_with_mock(db: MockDatabase, controler: Arc<C>) -> Arc<Self> {
+        let watering_system = WateringSystem::new(controler).await;
         Arc::new(AppState {
             db: Database { sender: db.sender.clone() }, // Use the mock database sender
             watering_system,

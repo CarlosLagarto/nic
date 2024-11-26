@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use super::{
     ds::{Cycle, WateringState},
+    interface::SensorController,
     schedule::AllowedTimeframe,
     state_machine::WateringStateMachine,
 };
@@ -17,11 +20,12 @@ impl ModeAuto {
         Self { cycle, timeframe }
     }
 
-    pub async fn execute(
+    pub async fn execute<C: SensorController>(
         &mut self,
         state_machine: &mut WateringStateMachine,
         db: Database,
         current_time: NaiveTime,
+        controller: &Arc<C>,
     ) {
         if state_machine.state == WateringState::Idle {
             println!("Auto Mode: Machine is stopped. Skipping execution.");
@@ -37,6 +41,6 @@ impl ModeAuto {
             println!("Auto Mode: Starting auto cycle.");
             state_machine.start_cycle(self.cycle.clone());
         }
-        state_machine.update(db, "Auto").await;
+        state_machine.update(db, "Auto", controller).await;
     }
 }

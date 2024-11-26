@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use super::{
     ds::{Cycle, WateringState},
+    interface::SensorController,
     state_machine::WateringStateMachine,
 };
 use crate::db::Database;
@@ -14,7 +17,12 @@ impl ModeManual {
         Self { cycle }
     }
 
-    pub async fn execute(&mut self, state_machine: &mut WateringStateMachine, db: Database) {
+    pub async fn execute<C: SensorController>(
+        &mut self,
+        state_machine: &mut WateringStateMachine,
+        db: Database,
+        controller: &Arc<C>,
+    ) {
         if state_machine.state == WateringState::Idle {
             println!("Manual Mode: Machine is stopped. Skipping execution.");
             return;
@@ -23,6 +31,6 @@ impl ModeManual {
             println!("Manual Mode: Starting manual cycle.");
             state_machine.start_cycle(self.cycle.clone());
         }
-        state_machine.update(db, "Manual").await;
+        state_machine.update(db, "Manual", controller).await;
     }
 }

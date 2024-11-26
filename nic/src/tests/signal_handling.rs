@@ -1,16 +1,15 @@
-use std::sync::Arc;
-
-use chrono::Duration;
-
 use crate::{
     db::mock::MockDatabase,
+    tests::mock_sensors::set_sensor_controller,
     watering::ds::{AppState, Cycle, EnvironmentalSignal, WateringState},
 };
+use chrono::Duration;
 
 #[tokio::test]
 async fn test_signal_handling() {
     let db = MockDatabase::new();
-    let app_state = Arc::new(AppState::new_with_mock(db).await);
+    let controller = set_sensor_controller();
+    let app_state = AppState::new_with_mock(db, controller).await;
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
     state_machine.start_cycle(Cycle {
@@ -30,7 +29,8 @@ async fn test_signal_handling() {
 #[tokio::test]
 async fn test_weather_signal_handling_all_states() {
     let db = MockDatabase::new();
-    let app_state = Arc::new(AppState::new_with_mock(db).await);
+    let controller = set_sensor_controller();
+    let app_state = AppState::new_with_mock(db, controller).await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
@@ -81,7 +81,8 @@ async fn test_weather_signal_handling_all_states() {
 #[tokio::test]
 async fn test_signal_handling_high_wind_and_low_wind() {
     let db = MockDatabase::new();
-    let app_state = Arc::new(AppState::new_with_mock(db).await);
+    let controller = set_sensor_controller();
+    let app_state = AppState::new_with_mock(db, controller).await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
@@ -108,7 +109,8 @@ async fn test_signal_handling_high_wind_and_low_wind() {
 #[tokio::test]
 async fn test_signal_handling_high_wind() {
     let db = MockDatabase::new();
-    let app_state = Arc::new(AppState::new_with_mock(db).await);
+    let controller = set_sensor_controller();
+    let app_state = AppState::new_with_mock(db, controller).await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 

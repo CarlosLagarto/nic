@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use super::{
-    mode_auto::ModeAuto, mode_manual::ModeManual, mode_wizard::ModeWizard,
-    state_machine::WateringStateMachine,
+    interface::SensorController, mode_auto::ModeAuto, mode_manual::ModeManual,
+    mode_wizard::ModeWizard, state_machine::WateringStateMachine,
 };
 use crate::db::Database;
 use chrono::NaiveTime;
@@ -13,16 +15,23 @@ pub enum ModeEnum {
 }
 
 impl ModeEnum {
-    pub async fn execute(
+    pub async fn execute<C: SensorController>(
         &mut self,
         state_machine: &mut WateringStateMachine,
         db: Database,
         current_time: NaiveTime,
+        controller: &Arc<C>,
     ) {
         match self {
-            ModeEnum::Manual(mode) => mode.execute(state_machine, db).await,
-            ModeEnum::Auto(mode) => mode.execute(state_machine, db, current_time).await,
-            ModeEnum::Wizard(mode) => mode.execute(state_machine, db, current_time).await,
+            ModeEnum::Manual(mode) => mode.execute(state_machine, db, controller).await,
+            ModeEnum::Auto(mode) => {
+                mode.execute(state_machine, db, current_time, controller)
+                    .await
+            }
+            ModeEnum::Wizard(mode) => {
+                mode.execute(state_machine, db, current_time, controller)
+                    .await
+            }
         }
     }
 }

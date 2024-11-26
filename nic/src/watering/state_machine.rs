@@ -2,32 +2,28 @@ use std::{sync::Arc, time::Duration};
 
 use super::{
     ds::{AppState, ControlSignal, Cycle, WateringState},
+    interface::SensorController,
     mode::ModeEnum,
     mode_auto::ModeAuto,
     mode_manual::ModeManual,
     mode_wizard::ModeWizard,
     schedule::AllowedTimeframe,
 };
-use crate::{
-    db::Database,
-    watering::{
-        ds::WateringEvent,
-        interface::{activate_sector, deactivate_sector},
-    },
-};
+use crate::{db::Database, watering::ds::WateringEvent};
 use chrono::{Local, NaiveTime};
 use tokio::sync::{broadcast, Mutex, RwLock};
 
-pub struct WateringSystem {
+pub struct WateringSystem<C: SensorController> {
     pub state_machine: Arc<RwLock<WateringStateMachine>>,
     pub auto_mode: Arc<RwLock<ModeAuto>>,
     pub manual_mode: Arc<RwLock<ModeManual>>,
     pub wizard_mode: Arc<RwLock<ModeWizard>>,
     pub active_mode: Arc<RwLock<ModeEnum>>, // Tracks the currently active mode
+    pub controller: Arc<C>,                 // Sensor controller (mockable)
 }
 
-impl WateringSystem {
-    pub async fn new() -> Arc<Self> {
+impl<C: SensorController> WateringSystem<C> {
+    pub async fn new(controller: Arc<C>) -> Arc<Self> {
         let timeframe = AllowedTimeframe {
             start: NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
             end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
@@ -42,6 +38,7 @@ impl WateringSystem {
 
         Arc::new(WateringSystem {
             state_machine: Arc::new(RwLock::new(state_machine)),
+            controller,
             auto_mode: Arc::new(RwLock::new(auto_mode.clone())),
             manual_mode: Arc::new(RwLock::new(manual_mode)),
             wizard_mode: Arc::new(RwLock::new(wizard_mode)),
@@ -68,8 +65,8 @@ impl WateringSystem {
     }
 }
 
-pub async fn run_watering_system(
-    app_state: Arc<AppState>,
+pub async fn run_watering_system<C: SensorController + 'static>(
+    app_state: Arc<AppState<C>>,
     rx_signal: Arc<Mutex<broadcast::Receiver<ControlSignal>>>,
 ) {
     let watering_system_clone = app_state.watering_system.clone();
@@ -137,7 +134,12 @@ pub async fn run_watering_system(
             let mut active_mode = app_state.watering_system.active_mode.write().await;
             let mut state_machine = app_state.watering_system.state_machine.write().await;
             active_mode
-                .execute(&mut state_machine, app_state.db.clone(), current_time)
+                .execute(
+                    &mut state_machine,
+                    app_state.db.clone(),
+                    current_time,
+                    &app_state.watering_system.controller,
+                )
                 .await;
         }
     }
@@ -164,7 +166,12 @@ impl WateringStateMachine {
         self.state = WateringState::Idle;
     }
 
-    pub async fn update(&mut self, db: Database, event_type: &str) {
+    pub async fn update<C: SensorController>(
+        &mut self,
+        db: Database,
+        event_type: &str,
+        controller: &Arc<C>,
+    ) {
         if let Some(cycle) = &self.cycle {
             if self.current_instruction >= cycle.instructions.len() {
                 println!("Cycle completed.");
@@ -178,7 +185,7 @@ impl WateringStateMachine {
                 WateringState::Idle => {
                     println!("Activating sector {}", sector_id);
                     self.state = WateringState::Activating(sector_id);
-                    activate_sector(sector_id).await;
+                    controller.activate_sector(sector_id).await;
                 }
                 WateringState::Activating(_) => {
                     println!("Watering sector {} for {:?}", sector_id, duration);
@@ -202,7 +209,7 @@ impl WateringStateMachine {
                 }
                 WateringState::Deactivating(_) => {
                     println!("Deactivating sector {}", sector_id);
-                    deactivate_sector(sector_id).await;
+                    controller.deactivate_sector(sector_id).await;
                     self.current_instruction += 1;
                     self.state = WateringState::Idle;
                 }
@@ -211,7 +218,6 @@ impl WateringStateMachine {
         }
     }
 }
-
 
 #[cfg(test)]
 mod state_machine_tests {
