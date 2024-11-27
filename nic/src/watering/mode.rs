@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use super::{
     mode_auto::ModeAuto, mode_manual::ModeManual, mode_wizard::ModeWizard,
-    state_machine::WateringStateMachine,
+    watering_system::WateringSystem,
 };
-use crate::{db::Database, sensors::interface::SensorController};
+use crate::{db::DatabaseTrait, sensors::interface::SensorController};
 use chrono::NaiveTime;
 
 #[derive(Clone, Debug)]
@@ -15,23 +15,16 @@ pub enum ModeEnum {
 }
 
 impl ModeEnum {
-    pub async fn execute<C: SensorController + 'static>(
+    pub async fn execute<C: SensorController + 'static, D: DatabaseTrait + 'static>(
         &mut self,
-        state_machine: &mut WateringStateMachine,
-        db: Database,
+        water_sys: &mut WateringSystem<C>,
+        db: &Arc<D>,
         current_time: NaiveTime,
-        controller: &Arc<C>,
     ) {
         match self {
-            ModeEnum::Manual(mode) => mode.execute(state_machine, db, controller).await,
-            ModeEnum::Auto(mode) => {
-                mode.execute(state_machine, db, current_time, controller)
-                    .await
-            }
-            ModeEnum::Wizard(mode) => {
-                mode.execute(state_machine, db, current_time, controller)
-                    .await
-            }
+            ModeEnum::Manual(mode) => mode.execute(water_sys, db).await,
+            ModeEnum::Auto(mode) => mode.execute(water_sys, db, current_time).await,
+            ModeEnum::Wizard(mode) => mode.execute(water_sys, current_time, db).await,
         }
     }
 }

@@ -1,8 +1,9 @@
-use super::state_machine::WateringSystem;
-use crate::{db::Database, sensors::interface::SensorController};
+use crate::{db::DatabaseTrait, error::AppError, sensors::interface::SensorController};
 
 use chrono::Duration;
 use std::sync::Arc;
+
+use super::watering_system::WateringSystem;
 #[derive(Debug, Clone)]
 pub struct SectorInfo {
     pub id: u32,
@@ -14,6 +15,8 @@ pub struct SectorInfo {
     pub max_duration: Duration, // Maximum safe watering duration per session
     /// cm
     pub weekly_target: f64, // Weekly water target (cm)
+    /// current progress
+    pub progress: f64
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -53,18 +56,18 @@ pub struct WeatherConditions {
     pub wind_speed: f64, // in km/h or m/s
 }
 
-pub struct AppState<C: SensorController> {
-    pub db: Database,
+pub struct AppState<C: SensorController, D: DatabaseTrait> {
+    pub db: Arc<D>,
     pub watering_system: Arc<WateringSystem<C>>,
 }
 
-impl<C: SensorController> AppState<C> {
-    pub async fn new(db: Database, controler: Arc<C>) -> Arc<Self> {
-        let watering_system = WateringSystem::new(controler).await;
-        Arc::new(AppState {
+impl<C: SensorController + 'static, D: DatabaseTrait + 'static> AppState<C, D> {
+    pub async fn new(db: Arc<D>, sensors_ctrl: Arc<C>) -> Result<Arc<Self>, AppError> {
+        let watering_system = WateringSystem::new(sensors_ctrl, db.clone()).await?;
+        Ok(Arc::new(AppState {
             db,
             watering_system,
-        })
+        }))
     }
 }
 

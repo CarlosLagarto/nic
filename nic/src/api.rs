@@ -4,6 +4,7 @@ use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    db::DatabaseTrait,
     sensors::interface::SensorController,
     watering::{
         ds::{AppState, EventType, WateringState},
@@ -11,8 +12,8 @@ use crate::{
     },
 };
 
-pub async fn switch_to_auto<C: SensorController>(
-    app_state: State<Arc<AppState<C>>>,
+pub async fn switch_to_auto<C: SensorController + 'static, D: DatabaseTrait + 'static>(
+    app_state: State<Arc<AppState<C, D>>>,
 ) -> Json<&'static str> {
     let auto_mode = app_state.watering_system.auto_mode.read().await.clone();
     app_state
@@ -22,8 +23,8 @@ pub async fn switch_to_auto<C: SensorController>(
     Json("Switched to Auto Mode")
 }
 
-pub async fn switch_to_manual<C: SensorController>(
-    app_state: State<Arc<AppState<C>>>,
+pub async fn switch_to_manual<C: SensorController + 'static, D: DatabaseTrait + 'static>(
+    app_state: State<Arc<AppState<C, D>>>,
 ) -> Json<&'static str> {
     let manual_mode = app_state.watering_system.manual_mode.read().await.clone();
     app_state
@@ -33,8 +34,8 @@ pub async fn switch_to_manual<C: SensorController>(
     Json("Switched to Manual Mode")
 }
 
-pub async fn switch_to_wizard<C: SensorController>(
-    app_state: State<Arc<AppState<C>>>,
+pub async fn switch_to_wizard<C: SensorController + 'static, D: DatabaseTrait + 'static>(
+    app_state: State<Arc<AppState<C, D>>>,
 ) -> Json<&'static str> {
     let wizard_mode = app_state.watering_system.wizard_mode.read().await.clone();
     app_state
@@ -51,8 +52,8 @@ pub struct WateringStateResponse {
     pub current_cycle: Option<String>,
 }
 
-pub async fn get_state<C: SensorController>(
-    State(app_state): State<Arc<AppState<C>>>,
+pub async fn get_state<C: SensorController, D: DatabaseTrait>(
+    State(app_state): State<Arc<AppState<C, D>>>,
 ) -> Json<WateringStateResponse> {
     let active_mode = app_state.watering_system.active_mode.read().await;
     let mode = match &*active_mode {
@@ -87,8 +88,8 @@ pub async fn get_state<C: SensorController>(
     })
 }
 
-pub async fn send_command<C: SensorController>(
-    State(_app_state): State<Arc<AppState<C>>>,
+pub async fn send_command<C: SensorController, D: DatabaseTrait>(
+    State(_app_state): State<Arc<AppState<C, D>>>,
 ) -> String {
     // Parse command and modify system state
     // TODO:
@@ -101,8 +102,8 @@ pub struct CycleResponse {
     pub instructions: Option<Vec<(u32, String)>>, // Instruction details: sector and duration
 }
 
-pub async fn get_cycle<C: SensorController>(
-    State(app_state): State<Arc<AppState<C>>>,
+pub async fn get_cycle<C: SensorController, D: DatabaseTrait>(
+    State(app_state): State<Arc<AppState<C, D>>>,
 ) -> Json<CycleResponse> {
     let state_machine = app_state.watering_system.state_machine.read().await;
 

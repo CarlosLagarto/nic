@@ -1,4 +1,5 @@
-use crate::{db::Database, watering::ds::ControlSignal};
+use crate::db::DatabaseTrait;
+use crate::watering::ds::ControlSignal;
 use rumqttc::AsyncClient;
 use rumqttc::{Event, MqttOptions, Packet};
 use std::sync::Arc;
@@ -6,7 +7,10 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 
-pub async fn monitor_udp(tx: Arc<broadcast::Sender<ControlSignal>>, _db: Database) {
+pub async fn monitor_udp<D: DatabaseTrait + 'static>(
+    tx: Arc<broadcast::Sender<ControlSignal>>,
+    _db: Arc<D>,
+) {
     let socket = UdpSocket::bind("0.0.0.0:12345").await.unwrap();
     let mut buf = [0; 1024];
 

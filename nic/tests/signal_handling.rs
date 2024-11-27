@@ -1,18 +1,11 @@
 use chrono::Duration;
 use nic::watering::ds::{Cycle, EnvironmentalSignal, WateringState};
 
-#[path = "common/mod.rs"]
-mod common;
-use common::{
-    mock_db::{new_with_mock, MockDatabase},
-    mock_sensors::set_sensor_controller,
-};
+use test_utilities::common::set_app_state;
 
 #[tokio::test]
 async fn test_signal_handling() {
-    let db = MockDatabase::new();
-    let controller = set_sensor_controller();
-    let app_state = new_with_mock(db, controller).await;
+    let app_state = set_app_state().await;
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
     state_machine.start_cycle(Cycle {
@@ -31,9 +24,7 @@ async fn test_signal_handling() {
 
 #[tokio::test]
 async fn test_weather_signal_handling_all_states() {
-    let db = MockDatabase::new();
-    let controller = set_sensor_controller();
-    let app_state = new_with_mock(db, controller).await;
+    let app_state = set_app_state().await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
@@ -79,9 +70,7 @@ async fn test_weather_signal_handling_all_states() {
 
 #[tokio::test]
 async fn test_signal_handling_high_wind_and_low_wind() {
-    let db = MockDatabase::new();
-    let controller = set_sensor_controller();
-    let app_state = new_with_mock(db, controller).await;
+    let app_state = set_app_state().await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
@@ -105,9 +94,7 @@ async fn test_signal_handling_high_wind_and_low_wind() {
 
 #[tokio::test]
 async fn test_signal_handling_high_wind() {
-    let db = MockDatabase::new();
-    let controller = set_sensor_controller();
-    let app_state = new_with_mock(db, controller).await;
+    let app_state = set_app_state().await;
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 

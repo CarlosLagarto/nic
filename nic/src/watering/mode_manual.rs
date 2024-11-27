@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use tracing::{debug, info};
+
 use super::{
-    ds::{Cycle, EventType, WateringState},
-    state_machine::WateringStateMachine,
+    ds::{Cycle, EventType},
+    watering_system::WateringSystem,
 };
-use crate::{db::Database, sensors::interface::SensorController};
+use crate::{db::DatabaseTrait, sensors::interface::SensorController};
 
 #[derive(Clone, Debug)]
 pub struct ModeManual {
@@ -16,22 +18,22 @@ impl ModeManual {
         Self { cycle }
     }
 
-    pub async fn execute<C: SensorController + 'static>(
+    pub async fn execute<C: SensorController + 'static, D: DatabaseTrait + 'static>(
         &mut self,
-        state_machine: &mut WateringStateMachine,
-        db: Database,
-        controller: &Arc<C>,
+        water_sys: &mut WateringSystem<C>,
+        db: &Arc<D>,
     ) {
-        if state_machine.state == WateringState::Idle {
-            println!("Manual Mode: Machine is stopped. Skipping execution.");
+        if water_sys.is_idle().await {
+            debug!("Manual Mode: Machine is stopped. Skipping execution.");
             return;
         }
-        if state_machine.cycle.is_none() {
-            println!("Manual Mode: Starting manual cycle.");
-            state_machine.start_cycle(self.cycle.clone());
+        {
+            let mut sm = water_sys.state_machine.write().await;
+            if sm.cycle.is_none() {
+                info!("Auto Mode: Starting manual cycle.");
+                sm.start_cycle(self.cycle.clone());
+            }
         }
-        state_machine
-            .update(db, EventType::Manual, controller)
-            .await;
+        water_sys.update(db, EventType::Manual).await;
     }
 }

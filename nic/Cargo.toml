@@ -18,17 +18,19 @@ serde = { version = "1.0", features = ["derive"] }
 
 thiserror = "2.0.3"
 tokio = { version = "1", features = ["full"] }
-
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tower = "0.5.1"
 hyper = { version = "1.5.1", features = ["full"] }
 mockall = "0.13.1"
+test-utilities = { path = "test-utilities" }
 
 [profile.release]
 lto = true
 
 [lib]
-name = "nic"          
-path = "src/lib.rs"  
+name = "nic"
+path = "src/lib.rs"
 crate-type = ["rlib"]

@@ -1,0 +1,33 @@
+[package]
+name = "test-utilities"
+version = "0.1.0"
+edition = "2021"
+# [lib]
+# name = "test-utilities"          
+# path = "src/lib.rs"  
+# crate-type = ["rlib"]
+
+[dependencies]
+async-trait = "0.1.83"
+axum = "0.7.9"
+# axum-server = "0.7.1"
+chrono = "0.4"
+# futures-util = "0.3"
+
+# reqwest = "0.12.9"
+# rumqttc = "0.24.0"
+rusqlite = "0.32.1"
+# serde_json = "1.0.133"
+# serde = { version = "1.0", features = ["derive"] }
+
+# thiserror = "2.0.3"
+tokio = { version = "1", features = ["full"] }
+# tracing = "0.1"
+# tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# [dev-dependencies]
+# tower = "0.5.1"
+# hyper = { version = "1.5.1", features = ["full"] }
+mockall = "0.13.1"
+nic = { path = "../../nic" }
+

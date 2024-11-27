@@ -5,3 +5,4 @@ pub mod mode_manual;
 pub mod mode_wizard;
 pub mod schedule;
 pub mod state_machine;
+pub mod watering_system;

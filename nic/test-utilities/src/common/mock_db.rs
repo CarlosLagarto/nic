@@ -2,22 +2,26 @@ use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
-use nic::db::{Database, DatabaseCommand};
+use async_trait::async_trait;
+use nic::db::DatabaseCommand;
+use nic::db::DatabaseTrait;
 use nic::sensors::interface::SensorController;
+use nic::watering::ds::WateringEvent;
 use nic::watering::ds::{AppState, Cycle, SectorInfo, WeatherConditions};
-use nic::watering::state_machine::WateringSystem;
+use nic::watering::watering_system::WateringSystem;
+use rusqlite::Result;
+use nic::error::AppError;
 
-pub async fn new_with_mock<C: SensorController>(
-    db: MockDatabase,
+
+pub async fn new_with_mock<C: SensorController + 'static, D: DatabaseTrait + 'static>(
+    db: Arc<D>,
     controler: Arc<C>,
-) -> Arc<AppState<C>> {
-    let watering_system = WateringSystem::new(controler).await;
-    Arc::new(AppState {
-        db: Database {
-            sender: db.sender.clone(),
-        }, // Use the mock database sender
+) -> Result<Arc<AppState<C, D>>, AppError> {
+    let watering_system = WateringSystem::new(controler, db.clone()).await?;
+    Ok(Arc::new(AppState {
+        db,
         watering_system,
-    })
+    }))
 }
 
 #[derive(Clone)]
@@ -62,6 +66,7 @@ impl MockDatabase {
                             sprinkler_debit: 1.0,
                             max_duration: chrono::Duration::minutes(30),
                             percolation_rate: 0.5,
+                            progress: 0.,
                         }];
                         let _ = response.send(Ok(sectors));
                     }
@@ -90,5 +95,62 @@ impl MockDatabase {
         });
 
         MockDatabase { sender: tx, data }
+    }
+}
+
+#[async_trait]
+impl DatabaseTrait for MockDatabase {
+    fn execute(
+        &self,
+        _query: &str,
+        _params: Vec<Box<dyn rusqlite::ToSql + Send>>,
+    ) -> Result<usize> {
+        Ok(1) // Simulate success
+    }
+
+    fn execute_batch(&self, _query: &str) -> Result<()> {
+        Ok(()) // Simulate success
+    }
+
+    fn query_row(
+        &self,
+        query: &str,
+        _params: Vec<Box<dyn rusqlite::ToSql + Send>>,
+    ) -> Result<String> {
+        self.data
+            .lock()
+            .unwrap()
+            .get(&query.to_owned())
+            .cloned()
+            .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    fn load_sectors(&self) -> Result<Vec<SectorInfo>> {
+        Ok(vec![SectorInfo {
+            id: 1,
+            weekly_target: 2.5,
+            sprinkler_debit: 1.0,
+            max_duration: chrono::Duration::minutes(30),
+            percolation_rate: 0.5,
+            progress: 0.,
+        }])
+    }
+
+    fn load_cycles(&self) -> Result<Vec<Cycle>> {
+        Ok(vec![Cycle {
+            id: 1,
+            instructions: vec![(1, chrono::Duration::minutes(30))],
+        }])
+    }
+
+    fn log_watering_event(&self, _evt: WateringEvent) -> Result<()> {
+        Ok(()) // Simulate success
+    }
+
+    fn get_current_weather(&self) -> Option<WeatherConditions> {
+        Some(WeatherConditions {
+            is_raining: false,
+            wind_speed: 10.0,
+        })
     }
 }

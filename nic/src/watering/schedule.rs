@@ -1,6 +1,6 @@
 use chrono::NaiveTime;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AllowedTimeframe {
     pub start: NaiveTime,
     pub end: NaiveTime,

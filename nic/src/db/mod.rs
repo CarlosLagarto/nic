@@ -1,8 +1,25 @@
 use crate::watering::ds::{Cycle, SectorInfo, WateringEvent, WeatherConditions};
+use async_trait::async_trait;
 use chrono::Duration;
 use rusqlite::{params, Connection, Result, ToSql};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
+
+
+#[async_trait]
+pub trait DatabaseTrait: Send + Sync {
+    fn execute(&self, query: &str, params: Vec<Box<dyn rusqlite::ToSql + Send>>) -> Result<usize>;
+    fn execute_batch(&self, query: &str) -> Result<()>;
+    fn query_row(
+        &self,
+        query: &str,
+        params: Vec<Box<dyn rusqlite::ToSql + Send>>,
+    ) -> Result<String>;
+    fn load_sectors(&self) -> Result<Vec<SectorInfo>>;
+    fn load_cycles(&self) -> Result<Vec<Cycle>>;
+    fn log_watering_event(&self, evt: WateringEvent) -> Result<()>;
+    fn get_current_weather(&self) -> Option<WeatherConditions>;
+}
 
 pub enum DatabaseCommand {
     Execute {
@@ -95,12 +112,11 @@ impl Database {
 
         Ok(Self { sender: tx })
     }
+}
 
-    pub fn execute(
-        &self,
-        query: &str,
-        params: Vec<Box<dyn rusqlite::ToSql + Send>>,
-    ) -> Result<usize> {
+#[async_trait]
+impl DatabaseTrait for Database {
+    fn execute(&self, query: &str, params: Vec<Box<dyn rusqlite::ToSql + Send>>) -> Result<usize> {
         let (response_tx, response_rx) = mpsc::channel();
         self.sender
             .send(DatabaseCommand::Execute {
@@ -112,7 +128,7 @@ impl Database {
         response_rx.recv().unwrap()
     }
 
-    pub fn execute_batch(&self, query: &str) -> Result<()> {
+    fn execute_batch(&self, query: &str) -> Result<()> {
         let (response_tx, response_rx) = mpsc::channel();
         self.sender
             .send(DatabaseCommand::ExecuteBatch {
@@ -123,7 +139,7 @@ impl Database {
         response_rx.recv().unwrap()
     }
 
-    pub fn query_row(
+    fn query_row(
         &self,
         query: &str,
         params: Vec<Box<dyn rusqlite::ToSql + Send>>,
@@ -139,7 +155,7 @@ impl Database {
         response_rx.recv().unwrap()
     }
 
-    pub fn load_sectors(&self) -> Result<Vec<SectorInfo>> {
+    fn load_sectors(&self) -> Result<Vec<SectorInfo>> {
         let (response_tx, response_rx) = mpsc::channel();
         self.sender
             .send(DatabaseCommand::LoadSectors {
@@ -149,7 +165,7 @@ impl Database {
         response_rx.recv().unwrap()
     }
 
-    pub fn load_cycles(&self) -> Result<Vec<Cycle>> {
+    fn load_cycles(&self) -> Result<Vec<Cycle>> {
         let (response_tx, response_rx) = mpsc::channel();
         self.sender
             .send(DatabaseCommand::LoadCycles {
@@ -159,7 +175,7 @@ impl Database {
         response_rx.recv().unwrap()
     }
 
-    pub fn log_watering_event(&self, evt: WateringEvent) -> Result<()> {
+    fn log_watering_event(&self, evt: WateringEvent) -> Result<()> {
         let (response_tx, response_rx) = mpsc::channel();
         self.sender
             .send(DatabaseCommand::LogWateringEvent {
@@ -170,7 +186,7 @@ impl Database {
         response_rx.recv().unwrap()
     }
 
-    pub fn get_current_weather(&self) -> Option<WeatherConditions> {
+    fn get_current_weather(&self) -> Option<WeatherConditions> {
         let (response_tx, response_rx) = mpsc::channel();
         self.sender
             .send(DatabaseCommand::GetCurrentWeather {
@@ -188,7 +204,8 @@ pub fn initialize(conn: &Connection) -> Result<()> {
             sprinkler_debit REAL NOT NULL,
             percolation_rate REAL NOT NULL,
             max_duration INTEGER NOT NULL,
-            weekly_target REAL NOT NULL
+            weekly_target REAL NOT NULL,
+            progress REAL NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS cycles (
@@ -217,7 +234,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
 
 pub fn load_sectors(conn: &Connection) -> Result<Vec<SectorInfo>> {
     let mut stmt = conn.prepare(
-        "SELECT id, sprinkler_debit, percolation_rate, max_duration, weekly_target FROM sectors",
+        "SELECT id, sprinkler_debit, percolation_rate, max_duration, weekly_target, progress FROM sectors",
     )?;
     let sectors = stmt
         .query_map([], |row| {
@@ -227,6 +244,7 @@ pub fn load_sectors(conn: &Connection) -> Result<Vec<SectorInfo>> {
                 percolation_rate: row.get(2)?,
                 max_duration: Duration::minutes(row.get::<_, i64>(3)?),
                 weekly_target: row.get(4)?,
+                progress: row.get(5)?,
             })
         })?
         .filter_map(Result::ok)

@@ -8,22 +8,32 @@ use nic::db::Database;
 use nic::sensors::interface::RealSensorController;
 use nic::watering::ds::AppState;
 use nic::watering::ds::ControlSignal;
-use nic::watering::state_machine::run_watering_system;
+use nic::watering::watering_system::run_watering_system;
 use nic::weather;
+use tracing::{debug, info};
 use std::{error::Error, sync::Arc};
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
+use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let db = Database::new("watering_system.db")?;
+    tracing_subscriber::fmt()
+        .with_env_filter("nic=debug") // Adjust log level for your app
+        .with_target(false) // Hide target module info if not needed
+        .init();
+
+    info!("Starting application...");
+    debug!("test");
+
+    let db = Arc::new(Database::new("watering_system.db")?);
 
     // Broadcast channel for real-time updates
     let (tx, rx) = broadcast::channel::<ControlSignal>(100);
     let tx = Arc::new(tx);
     let rx = Arc::new(Mutex::new(rx));
     let controller = Arc::new(RealSensorController {});
-    let app_state = AppState::new(db.clone(), controller).await;
+    let app_state = AppState::new(db.clone(), controller).await?;
 
     tokio::spawn(weather::mqtt_mon::monitor_mqtt(tx.clone()));
     tokio::spawn(weather::mqtt_mon::monitor_udp(tx.clone(), db.clone()));
@@ -32,7 +42,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .route("/devices", get(weather::api::list_devices))
         .route("/weather", get(weather::api::query_weather))
         .route("/state", get(get_state))
-        .route("/state", get(get_cycle))
+        .route("/cycle", get(get_cycle))
         .route("/switch/auto", post(switch_to_auto))
         .route("/switch/manual", post(switch_to_manual))
         .route("/switch/wizard", post(switch_to_wizard))
@@ -44,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         run_watering_system(app_state.clone(), rx).await;
     });
 
-    println!("Starting HTTP server on http://0.0.0.0:8080");
+    info!("Starting HTTP server on http://0.0.0.0:8080");
     Server::bind("0.0.0.0:8080".parse().unwrap())
         .serve(app.into_make_service())
         .await
