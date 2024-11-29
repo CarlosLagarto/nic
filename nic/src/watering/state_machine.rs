@@ -8,11 +8,7 @@ pub struct WateringStateMachine {
 
 impl WateringStateMachine {
     pub fn new() -> Self {
-        Self {
-            state: WateringState::Idle,
-            cycle: None,
-            current_instruction: 0,
-        }
+        Self { state: WateringState::Idle, cycle: None, current_instruction: 0 }
     }
 
     pub fn start_cycle(&mut self, cycle: Cycle) {

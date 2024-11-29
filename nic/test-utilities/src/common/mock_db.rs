@@ -1,27 +1,19 @@
+use async_trait::async_trait;
+use nic::db::{DatabaseCommand, DatabaseTrait};
+use nic::error::AppError;
+use nic::sensors::interface::SensorController;
+use nic::watering::ds::{AppState, Cycle, SectorInfo, WateringEvent, WeatherConditions};
+use nic::watering::watering_system::WateringSystem;
+use rusqlite::Result;
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
-use nic::db::DatabaseCommand;
-use nic::db::DatabaseTrait;
-use nic::sensors::interface::SensorController;
-use nic::watering::ds::WateringEvent;
-use nic::watering::ds::{AppState, Cycle, SectorInfo, WeatherConditions};
-use nic::watering::watering_system::WateringSystem;
-use rusqlite::Result;
-use nic::error::AppError;
-
-
 pub async fn new_with_mock<C: SensorController + 'static, D: DatabaseTrait + 'static>(
-    db: Arc<D>,
-    controler: Arc<C>,
+    db: Arc<D>, controler: Arc<C>,
 ) -> Result<Arc<AppState<C, D>>, AppError> {
     let watering_system = WateringSystem::new(controler, db.clone()).await?;
-    Ok(Arc::new(AppState {
-        db,
-        watering_system,
-    }))
+    Ok(Arc::new(AppState { db, watering_system }))
 }
 
 #[derive(Clone)]
@@ -40,9 +32,7 @@ impl MockDatabase {
         std::thread::spawn(move || {
             while let Ok(command) = rx.recv() {
                 match command {
-                    DatabaseCommand::Execute {
-                        query, response, ..
-                    } => {
+                    DatabaseCommand::Execute { query, response, .. } => {
                         println!("Mock execute: {}", query);
                         let _ = response.send(Ok(1)); // Simulate a successful execution
                     }
@@ -50,13 +40,10 @@ impl MockDatabase {
                         println!("Mock execute batch: {}", query);
                         let _ = response.send(Ok(())); // Simulate a successful batch execution
                     }
-                    DatabaseCommand::QueryRow {
-                        query, response, ..
-                    } => {
+                    DatabaseCommand::QueryRow { query, response, .. } => {
                         println!("Mock query row: {}", query);
                         let result = data_clone.lock().unwrap().get(&query).cloned();
-                        let _ = response
-                            .send(result.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows));
+                        let _ = response.send(result.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows));
                     }
                     DatabaseCommand::LoadSectors { response } => {
                         println!("Mock load sectors");
@@ -72,10 +59,7 @@ impl MockDatabase {
                     }
                     DatabaseCommand::LoadCycles { response } => {
                         println!("Mock load cycles");
-                        let cycles = vec![Cycle {
-                            id: 1,
-                            instructions: vec![(1, chrono::Duration::minutes(30))],
-                        }];
+                        let cycles = vec![Cycle { id: 1, instructions: vec![(1, chrono::Duration::minutes(30))] }];
                         let _ = response.send(Ok(cycles));
                     }
                     DatabaseCommand::LogWateringEvent { evt, response } => {
@@ -84,10 +68,7 @@ impl MockDatabase {
                     }
                     DatabaseCommand::GetCurrentWeather { response } => {
                         println!("Mock get current weather");
-                        let weather = WeatherConditions {
-                            is_raining: false,
-                            wind_speed: 10.0,
-                        };
+                        let weather = WeatherConditions { is_raining: false, wind_speed: 10.0, humidity: 20., solar_radiation: 1., temperature: 15. };
                         let _ = response.send(Some(weather));
                     }
                 }
@@ -100,11 +81,7 @@ impl MockDatabase {
 
 #[async_trait]
 impl DatabaseTrait for MockDatabase {
-    fn execute(
-        &self,
-        _query: &str,
-        _params: Vec<Box<dyn rusqlite::ToSql + Send>>,
-    ) -> Result<usize> {
+    fn execute(&self, _query: &str, _params: Vec<Box<dyn rusqlite::ToSql + Send>>) -> Result<usize> {
         Ok(1) // Simulate success
     }
 
@@ -112,17 +89,8 @@ impl DatabaseTrait for MockDatabase {
         Ok(()) // Simulate success
     }
 
-    fn query_row(
-        &self,
-        query: &str,
-        _params: Vec<Box<dyn rusqlite::ToSql + Send>>,
-    ) -> Result<String> {
-        self.data
-            .lock()
-            .unwrap()
-            .get(&query.to_owned())
-            .cloned()
-            .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)
+    fn query_row(&self, query: &str, _params: Vec<Box<dyn rusqlite::ToSql + Send>>) -> Result<String> {
+        self.data.lock().unwrap().get(&query.to_owned()).cloned().ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)
     }
 
     fn load_sectors(&self) -> Result<Vec<SectorInfo>> {
@@ -137,10 +105,7 @@ impl DatabaseTrait for MockDatabase {
     }
 
     fn load_cycles(&self) -> Result<Vec<Cycle>> {
-        Ok(vec![Cycle {
-            id: 1,
-            instructions: vec![(1, chrono::Duration::minutes(30))],
-        }])
+        Ok(vec![Cycle { id: 1, instructions: vec![(1, chrono::Duration::minutes(30))] }])
     }
 
     fn log_watering_event(&self, _evt: WateringEvent) -> Result<()> {
@@ -148,9 +113,6 @@ impl DatabaseTrait for MockDatabase {
     }
 
     fn get_current_weather(&self) -> Option<WeatherConditions> {
-        Some(WeatherConditions {
-            is_raining: false,
-            wind_speed: 10.0,
-        })
+        Some(WeatherConditions { is_raining: false, wind_speed: 10.0, humidity: 20., solar_radiation: 1., temperature: 15. })
     }
 }

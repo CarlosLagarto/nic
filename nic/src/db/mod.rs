@@ -1,10 +1,11 @@
-use crate::watering::ds::{Cycle, SectorInfo, WateringEvent, WeatherConditions};
+use crate::watering::ds::{Cycle, SectorInfo, WateringEvent, WeatherConditions, WeeklyPlan};
+use crate::watering::schedule::{Schedule, ScheduleEntry};
 use async_trait::async_trait;
 use chrono::Duration;
+use num_traits::cast::FromPrimitive;
 use rusqlite::{params, Connection, Result, ToSql};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
-
 
 #[async_trait]
 pub trait DatabaseTrait: Send + Sync {
@@ -215,16 +216,28 @@ pub fn initialize(conn: &Connection) -> Result<()> {
             PRIMARY KEY (id, sector_id),
             FOREIGN KEY (sector_id) REFERENCES sectors(id)
         );
-
         CREATE TABLE IF NOT EXISTS watering_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cycle_id INTEGER,
             sector_id INTEGER NOT NULL,
-            start_time TEXT NOT NULL,
+            start_time_utc TEXT NOT NULL,  -- Store as UTC
             duration INTEGER NOT NULL,
             water_applied REAL NOT NULL,
             type TEXT NOT NULL,
             FOREIGN KEY (sector_id) REFERENCES sectors(id)
+        );
+        CREATE TABLE IF NOT EXISTS auto_schedules (
+            id INTEGER PRIMARY KEY,
+            days_of_week TEXT NOT NULL, -- Comma-separated weekdays (e.g., 'Mon,Wed,Fri')
+            start_times TEXT NOT NULL,  -- Comma-separated times (e.g., '06:00,18:00')
+            interval_days INTEGER       -- Optional interval between watering
+        );
+
+        CREATE TABLE IF NOT EXISTS wizard_schedule (
+            date TEXT NOT NULL,
+            sector_id INTEGER NOT NULL,
+            duration INTEGER NOT NULL,
+            PRIMARY KEY (date, sector_id)
         );
         ";
 
@@ -280,6 +293,63 @@ pub fn load_cycles(conn: &Connection) -> Result<Vec<Cycle>> {
         .collect())
 }
 
+pub fn load_auto_schedule(conn: &Connection) -> Result<Schedule> {
+    let mut stmt = conn.prepare(
+        "SELECT day_of_week, sector_id, duration FROM auto_schedule ORDER BY day_of_week, sector_id",
+    )?;
+
+    // Use a HashMap to group sector and duration entries by day_of_week
+    let mut entries_map: std::collections::HashMap<chrono::Weekday, Vec<(u32, chrono::Duration)>> =
+        std::collections::HashMap::new();
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            chrono::Weekday::from_i64(row.get::<_, i64>(0)?).unwrap(),
+            row.get::<_, u32>(1)?,                            // sector_id
+            chrono::Duration::seconds(row.get::<_, i64>(2)?), // duration in seconds
+        ))
+    })?;
+
+    for row in rows {
+        let (day_of_week, sector_id, duration) = row?;
+        entries_map
+            .entry(day_of_week)
+            .or_default()
+            .push((sector_id, duration));
+    }
+
+    // Convert the HashMap into a Vec<ScheduleEntry>
+    let entries = entries_map
+        .into_iter()
+        .map(|(day_of_week, start_times)| ScheduleEntry {
+            day_of_week,
+            start_times,
+        })
+        .collect();
+
+    Ok(Schedule::new(entries))
+}
+
+pub fn store_plan_in_db(conn: &mut Connection, weekly_plan: &WeeklyPlan) -> rusqlite::Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute_batch("DELETE FROM wizard_schedule")?; // Clear previous schedule
+
+    for (date, sessions) in weekly_plan {
+        for (sector_id, duration) in sessions {
+            tx.execute(
+                "INSERT INTO wizard_schedule (date, sector_id, duration) VALUES (?1, ?2, ?3)",
+                rusqlite::params![
+                    date.to_string(),       // Convert NaiveDate to string
+                    sector_id,              // Sector ID
+                    duration.num_minutes()  // Duration in minutes
+                ],
+            )?;
+        }
+    }
+
+    tx.commit()
+}
+
 pub fn log_watering_event(conn: &Connection, evt: WateringEvent) -> Result<()> {
     conn.execute(
         "INSERT INTO watering_events (cycle_id, sector_id, start_time, duration, water_applied, type)
@@ -302,6 +372,67 @@ pub fn get_current_weather() -> Option<WeatherConditions> {
     // Replace with actual database or API query
     Some(WeatherConditions {
         is_raining: false, // Example: No rain
-        wind_speed: 15.0,  // Example: Wind speed is 15 km/h
+        wind_speed: 15.0,
+        temperature: 15.,
+        humidity: 40.,
+        solar_radiation: 1., // Example: Wind speed is 15 km/h
     })
+}
+
+#[cfg(test)]
+mod test {
+    use crate::db::load_auto_schedule;
+
+    #[test]
+    fn test_load_auto_schedule() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+
+        conn.execute(
+            "CREATE TABLE auto_schedule (day_of_week INTEGER, sector_id INTEGER, duration INTEGER)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO auto_schedule (day_of_week, sector_id, duration) VALUES (1, 101, 1800)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO auto_schedule (day_of_week, sector_id, duration) VALUES (1, 102, 3600)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO auto_schedule (day_of_week, sector_id, duration) VALUES (2, 201, 1200)",
+            [],
+        )
+        .unwrap();
+
+        let schedule = load_auto_schedule(&conn).unwrap();
+        assert_eq!(schedule.entries.len(), 2);
+
+        let monday_schedule = schedule
+            .entries
+            .iter()
+            .find(|entry| entry.day_of_week == chrono::Weekday::Mon)
+            .unwrap();
+        assert_eq!(
+            monday_schedule.start_times,
+            vec![
+                (101, chrono::Duration::seconds(1800)),
+                (102, chrono::Duration::seconds(3600))
+            ]
+        );
+
+        let tuesday_schedule = schedule
+            .entries
+            .iter()
+            .find(|entry| entry.day_of_week == chrono::Weekday::Tue)
+            .unwrap();
+        assert_eq!(
+            tuesday_schedule.start_times,
+            vec![(201, chrono::Duration::seconds(1200))]
+        );
+    }
 }

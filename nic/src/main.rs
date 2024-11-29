@@ -19,8 +19,8 @@ use tracing_subscriber;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
-        .with_env_filter("nic=debug") // Adjust log level for your app
-        .with_target(false) // Hide target module info if not needed
+        .with_env_filter("nic=debug")
+        .with_target(false) // Hide target module info 
         .init();
 
     info!("Starting application...");
@@ -32,6 +32,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (tx, rx) = broadcast::channel::<ControlSignal>(100);
     let tx = Arc::new(tx);
     let rx = Arc::new(Mutex::new(rx));
+    
     let controller = Arc::new(RealSensorController {});
     let app_state = AppState::new(db.clone(), controller).await?;
 

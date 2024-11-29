@@ -1,9 +1,13 @@
 use crate::{db::DatabaseTrait, error::AppError, sensors::interface::SensorController};
 
-use chrono::Duration;
+use chrono::{Duration, NaiveDate};
 use std::sync::Arc;
 
 use super::watering_system::WateringSystem;
+
+pub type DailyPlan = Vec<(u32, chrono::Duration)>; // A day's plan: sector_id -> duration
+pub type WeeklyPlan = Vec<(NaiveDate, DailyPlan)>; // A week's plan: date -> daily plan
+
 #[derive(Debug, Clone)]
 pub struct SectorInfo {
     pub id: u32,
@@ -54,6 +58,9 @@ pub enum ControlSignal {
 pub struct WeatherConditions {
     pub is_raining: bool,
     pub wind_speed: f64, // in km/h or m/s
+    pub temperature: f64,
+    pub humidity: f64,
+    pub solar_radiation: f64
 }
 
 pub struct AppState<C: SensorController, D: DatabaseTrait> {

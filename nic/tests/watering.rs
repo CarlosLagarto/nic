@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::NaiveTime;
+use chrono::{NaiveDate, NaiveTime};
 use mockall::mock;
 use nic::{
     sensors::interface::SensorController,
@@ -28,10 +28,7 @@ async fn test_watering_at_right_times() {
     let (app_state, _controller) = set_app_state_and_controller().await;
 
     // Define allowed timeframe: 6 AM to 10 PM
-    let allowed_timeframe = AllowedTimeframe {
-        start: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
-        end: NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
-    };
+    let allowed_timeframe = AllowedTimeframe { start: NaiveTime::from_hms_opt(6, 0, 0).unwrap(), end: NaiveTime::from_hms_opt(22, 0, 0).unwrap() };
 
     // Set up WizardMode with sectors
     {
@@ -59,10 +56,10 @@ async fn test_watering_at_right_times() {
     }
 
     // Simulate watering execution at various times
-    let test_cases = vec![
-        (NaiveTime::from_hms_opt(5, 30, 0).unwrap(), false), // Before allowed timeframe
-        (NaiveTime::from_hms_opt(7, 0, 0).unwrap(), true),   // Within allowed timeframe
-        (NaiveTime::from_hms_opt(22, 30, 0).unwrap(), false), // After allowed timeframe
+    let test_cases: Vec<(NaiveDate, bool)> = vec![
+        (NaiveDate::parse_from_str("2024-11-29T17:00:00+01:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), false), // Before allowed timeframe
+        (NaiveDate::parse_from_str("2024-11-29T19:00:00+01:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), true),  // Within allowed timeframe
+        (NaiveDate::parse_from_str("2024-11-29T22:00:00+01:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), false), // After allowed timeframe
     ];
 
     for (time, should_water) in test_cases {
@@ -73,33 +70,20 @@ async fn test_watering_at_right_times() {
             let mut state_machine = app_state.watering_system.state_machine.write().await;
 
             // Start a new cycle
-            state_machine.start_cycle(Cycle {
-                id: 1,
-                instructions: vec![(1, chrono::Duration::minutes(15))],
-            });
+            state_machine.start_cycle(Cycle { id: 1, instructions: vec![(1, chrono::Duration::minutes(15))] });
         }
         let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
 
         // Call the execute function
-        wizard_mode
-            .execute(&app_state.watering_system, time, &app_state.db)
-            .await;
+        wizard_mode.execute(&app_state.watering_system, time, &app_state.db).await;
 
         {
             let mut state_machine = app_state.watering_system.state_machine.write().await;
             // Verify watering state
             if should_water {
-                assert_ne!(
-                    state_machine.state,
-                    WateringState::Idle,
-                    "Expected watering to start."
-                );
+                assert_ne!(state_machine.state, WateringState::Idle, "Expected watering to start.");
             } else {
-                assert_eq!(
-                    state_machine.state,
-                    WateringState::Idle,
-                    "Expected no watering outside timeframe."
-                );
+                assert_eq!(state_machine.state, WateringState::Idle, "Expected no watering outside timeframe.");
             }
 
             // Reset state
@@ -115,10 +99,7 @@ async fn test_watering_with_interrupts() {
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    let cycle = Cycle {
-        id: 1,
-        instructions: vec![(1, chrono::Duration::minutes(30))],
-    };
+    let cycle = Cycle { id: 1, instructions: vec![(1, chrono::Duration::minutes(30))] };
 
     state_machine.start_cycle(cycle);
 
