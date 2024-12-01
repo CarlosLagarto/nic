@@ -1,76 +1,55 @@
-use async_trait::async_trait;
-use chrono::{NaiveDate, NaiveTime};
-use mockall::mock;
 use nic::{
-    sensors::interface::SensorController,
+    utils::{display_from_ts, parse_datetime_to_utc_timestamp, sod},
     watering::{
         ds::{Cycle, EnvironmentalSignal, SectorInfo, WateringState},
-        schedule::AllowedTimeframe,
-        watering_system::load_sectors,
+        schedule::{AllowedTimeframe, Schedule, ScheduleEntry, ScheduleType},
+        watering_system::load_sectors_into_hashmap,
     },
 };
 use std::time::Duration;
 use test_utilities::common::{set_app_state, set_app_state_and_controller};
 use tokio::time::sleep;
 
-mock! {
-    pub SensorController {}
-
-    #[async_trait]
-    impl SensorController for SensorController {
-        async fn activate_sector(&self, sector: u32);
-        async fn deactivate_sector(&self, sector: u32);
-    }
-}
-
 #[tokio::test]
 async fn test_watering_at_right_times() {
     let (app_state, _controller) = set_app_state_and_controller().await;
 
-    // Define allowed timeframe: 6 AM to 10 PM
-    let allowed_timeframe = AllowedTimeframe { start: NaiveTime::from_hms_opt(6, 0, 0).unwrap(), end: NaiveTime::from_hms_opt(22, 0, 0).unwrap() };
+    let allowed_timeframe = AllowedTimeframe::new(22, 8);
 
-    // Set up WizardMode with sectors
+     // Set up WizardMode with sectors and schedule
     {
         *app_state.watering_system.timeframe.write().await = allowed_timeframe;
 
-        let sectors = load_sectors(vec![
-            SectorInfo {
-                id: 1,
-                sprinkler_debit: 1.5,
-                weekly_target: 10.0,
-                percolation_rate: 5.0,
-                max_duration: chrono::Duration::minutes(30),
-                progress: 0.,
-            },
-            SectorInfo {
-                id: 2,
-                sprinkler_debit: 2.0,
-                weekly_target: 12.0,
-                percolation_rate: 4.0,
-                max_duration: chrono::Duration::minutes(40),
-                progress: 0.,
-            },
+        let sectors = load_sectors_into_hashmap(vec![
+            SectorInfo::build(1, 2.5, 1.5, 30 * 60, 0., 5.),
+            SectorInfo::build(2, 12., 2., 40 * 60, 0., 4.),
         ]);
         *app_state.watering_system.sectors.write().await = sectors;
+
+        let now = parse_datetime_to_utc_timestamp("2024-11-29T17:00:00+00:00", "%Y-%m-%dT%H:%M:%S%z").unwrap();
+        let schedule_entries = vec![ScheduleEntry {
+            schedule_type: ScheduleType::Date(sod(now)), // Start of day for today
+            start_times: vec![
+                (1, sod(now) + (22 * 3600), 30 * 60), // Sector 1, start at 22:00 UTC, 30 mins duration
+            ],
+        }];
+        let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
+        wizard_mode.schedule = Schedule::new(schedule_entries);
     }
 
     // Simulate watering execution at various times
-    let test_cases: Vec<(NaiveDate, bool)> = vec![
-        (NaiveDate::parse_from_str("2024-11-29T17:00:00+01:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), false), // Before allowed timeframe
-        (NaiveDate::parse_from_str("2024-11-29T19:00:00+01:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), true),  // Within allowed timeframe
-        (NaiveDate::parse_from_str("2024-11-29T22:00:00+01:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), false), // After allowed timeframe
+    let test_cases: Vec<(i64, bool)> = vec![
+        (parse_datetime_to_utc_timestamp("2024-11-29T17:00:00+00:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), false), // Before allowed timeframe
+        (parse_datetime_to_utc_timestamp("2024-11-29T22:00:00+00:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), true), // Within allowed timeframe
+        (parse_datetime_to_utc_timestamp("2024-11-30T07:00:00+00:00", "%Y-%m-%dT%H:%M:%S%z").unwrap(), false), // After allowed timeframe
     ];
 
     for (time, should_water) in test_cases {
-        println!("Testing for time: {:?}", time);
+        println!("Testing for time: {:?}", display_from_ts(time));
 
         {
-            // Mock the current time
             let mut state_machine = app_state.watering_system.state_machine.write().await;
-
-            // Start a new cycle
-            state_machine.start_cycle(Cycle { id: 1, instructions: vec![(1, chrono::Duration::minutes(15))] });
+            state_machine.start_cycle(Cycle { id: 1, instructions: vec![(1, 15 * 3600)] });
         }
         let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
 
@@ -99,7 +78,7 @@ async fn test_watering_with_interrupts() {
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    let cycle = Cycle { id: 1, instructions: vec![(1, chrono::Duration::minutes(30))] };
+    let cycle = Cycle { id: 1, instructions: vec![(1, 30 * 3600)] };
 
     state_machine.start_cycle(cycle);
 

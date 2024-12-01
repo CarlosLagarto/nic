@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
-use tracing::{debug, info};
-
 use super::{
     ds::{Cycle, EventType},
     watering_system::WateringSystem,
 };
 use crate::{db::DatabaseTrait, sensors::interface::SensorController};
+use std::sync::Arc;
+use tracing::{debug, info};
 
 #[derive(Clone, Debug)]
 pub struct ModeManual {
@@ -19,9 +17,7 @@ impl ModeManual {
     }
 
     pub async fn execute<C: SensorController + 'static, D: DatabaseTrait + 'static>(
-        &mut self,
-        water_sys: &mut WateringSystem<C>,
-        db: &Arc<D>,
+        &mut self, water_sys: &mut WateringSystem<C>, db: &Arc<D>,
     ) {
         if water_sys.is_idle().await {
             debug!("Manual Mode: Machine is stopped. Skipping execution.");

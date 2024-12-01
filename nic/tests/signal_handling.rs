@@ -1,4 +1,3 @@
-use chrono::Duration;
 use nic::watering::ds::{Cycle, EnvironmentalSignal, WateringState};
 
 use test_utilities::common::set_app_state;
@@ -8,10 +7,7 @@ async fn test_signal_handling() {
     let app_state = set_app_state().await;
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    state_machine.start_cycle(Cycle {
-        id: 1,
-        instructions: vec![(1, Duration::minutes(30))],
-    });
+    state_machine.start_cycle(Cycle { id: 1, instructions: vec![(1, 30 * 3600)] });
 
     let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
     wizard_mode.handle_signal(EnvironmentalSignal::RainStart, &mut *state_machine);
@@ -28,11 +24,8 @@ async fn test_weather_signal_handling_all_states() {
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    let duration = chrono::Duration::minutes(30);
-    state_machine.start_cycle(Cycle {
-        id: 1,
-        instructions: vec![(1, duration)],
-    });
+    let duration = 30 * 3600;
+    state_machine.start_cycle(Cycle { id: 1, instructions: vec![(1, duration)] });
 
     let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
 
@@ -74,11 +67,8 @@ async fn test_signal_handling_high_wind_and_low_wind() {
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    let duration = chrono::Duration::minutes(30);
-    state_machine.start_cycle(Cycle {
-        id: 1,
-        instructions: vec![(1, duration)],
-    });
+    let duration = 30 * 3600;
+    state_machine.start_cycle(Cycle { id: 1, instructions: vec![(1, duration)] });
     state_machine.state = WateringState::Watering(1, duration);
 
     let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
@@ -98,11 +88,8 @@ async fn test_signal_handling_high_wind() {
 
     let mut state_machine = app_state.watering_system.state_machine.write().await;
 
-    let duration = chrono::Duration::minutes(30);
-    state_machine.start_cycle(Cycle {
-        id: 1,
-        instructions: vec![(1, duration)],
-    });
+    let duration = 30 * 3600;
+    state_machine.start_cycle(Cycle { id: 1, instructions: vec![(1, duration)] });
     state_machine.state = WateringState::Watering(1, duration);
 
     let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;

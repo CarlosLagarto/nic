@@ -1,27 +1,20 @@
 use axum::routing::post;
 use axum::{routing::get, Router};
 use axum_server::Server;
-use nic::api::{
-    get_cycle, get_state, send_command, switch_to_auto, switch_to_manual, switch_to_wizard,
-};
+use nic::api::{get_cycle, get_state, send_command, switch_to_auto, switch_to_manual, switch_to_wizard};
 use nic::db::Database;
 use nic::sensors::interface::RealSensorController;
-use nic::watering::ds::AppState;
-use nic::watering::ds::ControlSignal;
+use nic::utils::start_log;
+use nic::watering::ds::{AppState, ControlSignal};
 use nic::watering::watering_system::run_watering_system;
 use nic::weather;
-use tracing::{debug, info};
 use std::{error::Error, sync::Arc};
-use tokio::sync::broadcast;
-use tokio::sync::Mutex;
-use tracing_subscriber;
+use tokio::sync::{broadcast, Mutex};
+use tracing::{debug, info};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter("nic=debug")
-        .with_target(false) // Hide target module info 
-        .init();
+    start_log();
 
     info!("Starting application...");
     debug!("test");
@@ -32,7 +25,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (tx, rx) = broadcast::channel::<ControlSignal>(100);
     let tx = Arc::new(tx);
     let rx = Arc::new(Mutex::new(rx));
-    
+
     let controller = Arc::new(RealSensorController {});
     let app_state = AppState::new(db.clone(), controller).await?;
 
@@ -56,22 +49,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     info!("Starting HTTP server on http://0.0.0.0:8080");
-    Server::bind("0.0.0.0:8080".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    Server::bind("0.0.0.0:8080".parse().unwrap()).serve(app.into_make_service()).await.unwrap();
     Ok(())
-    // let sectors = db.load_sectors()?;
-    // let cycles = db.load_cycles()?;
-
-    // println!("Loaded sectors: {:?}", sectors);
-    // println!("Loaded cycles: {:?}", cycles);
-
-    // let auto_cycle = cycles.iter().find(|c| c.id == 1).cloned();
-    // let manual_cycle = cycles.iter().find(|c| c.id == 2).cloned();
-
-    // if auto_cycle.is_none() || manual_cycle.is_none() {
-    //     eprintln!("Both Auto and Manual cycles must be defined in the database.");
-    //     return Ok(());
-    // }
 }

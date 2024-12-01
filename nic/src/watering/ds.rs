@@ -1,12 +1,10 @@
+use super::watering_system::WateringSystem;
 use crate::{db::DatabaseTrait, error::AppError, sensors::interface::SensorController};
-
-use chrono::{Duration, NaiveDate};
+use chrono::Duration;
 use std::sync::Arc;
 
-use super::watering_system::WateringSystem;
-
-pub type DailyPlan = Vec<(u32, chrono::Duration)>; // A day's plan: sector_id -> duration
-pub type WeeklyPlan = Vec<(NaiveDate, DailyPlan)>; // A week's plan: date -> daily plan
+pub type DailyPlan = Vec<(u32, i64, i64)>; // A day's plan: (sector_id , start time,  duration)
+pub type WeeklyPlan = Vec<(i64, DailyPlan)>; // A week's plan: date -> daily plan
 
 #[derive(Debug, Clone)]
 pub struct SectorInfo {
@@ -15,26 +13,34 @@ pub struct SectorInfo {
     pub sprinkler_debit: f64, // cm/hour (sprinkler output rate)
     /// mm/hour
     pub percolation_rate: f64, // mm/hour (soil percolation rate)
-    /// in minutes
-    pub max_duration: Duration, // Maximum safe watering duration per session
+    /// in seconds
+    pub max_duration: i64, // Maximum safe watering duration per session, in seconds
     /// cm
     pub weekly_target: f64, // Weekly water target (cm)
     /// current progress
-    pub progress: f64
+    pub progress: f64,
+}
+
+impl SectorInfo {
+    pub fn build(
+        id: u32, weekly_target: f64, sprinkler_debit: f64, max_duration: i64, progress: f64, percolation_rate: f64,
+    ) -> SectorInfo {
+        SectorInfo { id, weekly_target, sprinkler_debit, percolation_rate, max_duration, progress }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Cycle {
     pub id: u32,
-    pub instructions: Vec<(u32, Duration)>, // (Sector ID, Duration)
+    pub instructions: Vec<(u32, i64)>, // (Sector ID, Duration)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WateringState {
-    Idle,                            // No active watering
-    Activating(u32),                 // Activating a sector
-    Watering(u32, chrono::Duration), // Actively watering (sector ID, duration)
-    Deactivating(u32),               // Deactivating a sector
+    Idle,               // No active watering
+    Activating(u32),    // Activating a sector
+    Watering(u32, i64), // Actively watering (sector ID, duration)
+    Deactivating(u32),  // Deactivating a sector
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +66,7 @@ pub struct WeatherConditions {
     pub wind_speed: f64, // in km/h or m/s
     pub temperature: f64,
     pub humidity: f64,
-    pub solar_radiation: f64
+    pub solar_radiation: f64,
 }
 
 pub struct AppState<C: SensorController, D: DatabaseTrait> {
@@ -71,10 +77,7 @@ pub struct AppState<C: SensorController, D: DatabaseTrait> {
 impl<C: SensorController + 'static, D: DatabaseTrait + 'static> AppState<C, D> {
     pub async fn new(db: Arc<D>, sensors_ctrl: Arc<C>) -> Result<Arc<Self>, AppError> {
         let watering_system = WateringSystem::new(sensors_ctrl, db.clone()).await?;
-        Ok(Arc::new(AppState {
-            db,
-            watering_system,
-        }))
+        Ok(Arc::new(AppState { db, watering_system }))
     }
 }
 
@@ -90,21 +93,10 @@ pub struct WateringEvent {
 
 impl WateringEvent {
     pub fn new(
-        cycle_id: Option<u32>,
-        sector_id: u32,
-        start_time: String,
-        duration: Duration,
-        water_applied: f64,
+        cycle_id: Option<u32>, sector_id: u32, start_time: String, duration: Duration, water_applied: f64,
         event_type: EventType,
     ) -> Self {
-        Self {
-            cycle_id,
-            sector_id,
-            start_time,
-            duration,
-            water_applied,
-            event_type,
-        }
+        Self { cycle_id, sector_id, start_time, duration, water_applied, event_type }
     }
 }
 

@@ -1,8 +1,3 @@
-use std::sync::Arc;
-
-use axum::{extract::State, Json};
-use serde::{Deserialize, Serialize};
-
 use crate::{
     db::DatabaseTrait,
     sensors::interface::SensorController,
@@ -11,15 +6,15 @@ use crate::{
         mode::ModeEnum,
     },
 };
+use axum::{extract::State, Json};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub async fn switch_to_auto<C: SensorController + 'static, D: DatabaseTrait + 'static>(
     app_state: State<Arc<AppState<C, D>>>,
 ) -> Json<&'static str> {
     let auto_mode = app_state.watering_system.auto_mode.read().await.clone();
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Auto(auto_mode))
-        .await;
+    app_state.watering_system.switch_mode(ModeEnum::Auto(auto_mode)).await;
     Json("Switched to Auto Mode")
 }
 
@@ -27,10 +22,7 @@ pub async fn switch_to_manual<C: SensorController + 'static, D: DatabaseTrait + 
     app_state: State<Arc<AppState<C, D>>>,
 ) -> Json<&'static str> {
     let manual_mode = app_state.watering_system.manual_mode.read().await.clone();
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Manual(manual_mode))
-        .await;
+    app_state.watering_system.switch_mode(ModeEnum::Manual(manual_mode)).await;
     Json("Switched to Manual Mode")
 }
 
@@ -38,10 +30,7 @@ pub async fn switch_to_wizard<C: SensorController + 'static, D: DatabaseTrait + 
     app_state: State<Arc<AppState<C, D>>>,
 ) -> Json<&'static str> {
     let wizard_mode = app_state.watering_system.wizard_mode.read().await.clone();
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Wizard(wizard_mode))
-        .await;
+    app_state.watering_system.switch_mode(ModeEnum::Wizard(wizard_mode)).await;
     Json("Switched to Wizard Mode")
 }
 
@@ -66,26 +55,18 @@ pub async fn get_state<C: SensorController, D: DatabaseTrait>(
     let state = match state_machine.state {
         WateringState::Idle => "Idle".to_string(),
         WateringState::Activating(sector) => format!("Activating sector {}", sector),
-        WateringState::Watering(sector, duration) => format!(
-            "Watering sector {} for {} minutes",
-            sector,
-            duration.num_minutes()
-        ),
+        WateringState::Watering(sector, duration) => {
+            format!("Watering sector {} for {:.2} minutes", sector, (duration as f64 / 60.))
+        }
         WateringState::Deactivating(sector) => format!("Deactivating sector {}", sector),
     };
 
-    let current_cycle = state_machine.cycle.as_ref().map(|cycle| {
-        format!(
-            "Cycle ID: {}, Instructions: {:?}",
-            cycle.id, cycle.instructions
-        )
-    });
+    let current_cycle = state_machine
+        .cycle
+        .as_ref()
+        .map(|cycle| format!("Cycle ID: {}, Instructions: {:?}", cycle.id, cycle.instructions));
 
-    Json(WateringStateResponse {
-        mode: mode.to_string(),
-        state,
-        current_cycle,
-    })
+    Json(WateringStateResponse { mode: mode.to_string(), state, current_cycle })
 }
 
 pub async fn send_command<C: SensorController, D: DatabaseTrait>(
@@ -111,19 +92,11 @@ pub async fn get_cycle<C: SensorController, D: DatabaseTrait>(
         let instructions = cycle
             .instructions
             .iter()
-            .map(|(sector_id, duration)| {
-                (*sector_id, format!("{} minutes", duration.num_minutes()))
-            })
+            .map(|(sector_id, duration)| (*sector_id, format!("{} minutes", duration)))
             .collect();
 
-        Json(CycleResponse {
-            id: Some(cycle.id),
-            instructions: Some(instructions),
-        })
+        Json(CycleResponse { id: Some(cycle.id), instructions: Some(instructions) })
     } else {
-        Json(CycleResponse {
-            id: None,
-            instructions: None,
-        })
+        Json(CycleResponse { id: None, instructions: None })
     }
 }

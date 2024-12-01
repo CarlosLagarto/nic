@@ -4,11 +4,16 @@ use super::{
     mode_auto::ModeAuto,
     mode_manual::ModeManual,
     mode_wizard::ModeWizard,
-    schedule::{AllowedTimeframe, Schedule, ScheduleEntry},
+    schedule::{AllowedTimeframe, Schedule},
     state_machine::WateringStateMachine,
 };
-use crate::{db::DatabaseTrait, error::AppError, sensors::interface::SensorController, watering::ds::WateringEvent};
-use chrono::{DateTime, Local, NaiveDate, NaiveTime};
+use crate::{
+    db::DatabaseTrait,
+    error::AppError,
+    sensors::interface::SensorController,
+    utils::{display_from_ts, sod},
+    watering::ds::WateringEvent,
+};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tracing::{debug, info};
@@ -26,18 +31,14 @@ pub struct WateringSystem<C: SensorController> {
 
 impl<C: SensorController + 'static> WateringSystem<C> {
     pub async fn new<D: DatabaseTrait>(controller: Arc<C>, db: Arc<D>) -> Result<Arc<Self>, AppError> {
-        let timeframe = Arc::new(RwLock::new(AllowedTimeframe {
-            start: NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
-            end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
-        }));
-        // Initialize all progress to 0
+        let timeframe = Arc::new(RwLock::new(AllowedTimeframe::new(22, 8)));
+
         let sectors: Vec<SectorInfo> = db.load_sectors()?;
-        let sectors = Arc::new(RwLock::new(load_sectors(sectors)));
+        let sectors = Arc::new(RwLock::new(load_sectors_into_hashmap(sectors)));
 
         let state_machine = WateringStateMachine::new();
 
-        // TODO: Load modes (e.g., AutoMode, ManualMode, WizardMode) from the database
-        let (auto_mode, manual_mode, wizard_mode) = Self::initialize_modes();
+        let (auto_mode, manual_mode, wizard_mode) = Self::initialize_modes(&db);
 
         Ok(Arc::new(WateringSystem {
             state_machine: Arc::new(RwLock::new(state_machine)),
@@ -69,23 +70,21 @@ impl<C: SensorController + 'static> WateringSystem<C> {
         *active_mode = new_mode;
     }
 
-    fn initialize_modes() -> (ModeAuto, ModeManual, ModeWizard) {
-        // TODO: Simulated auto schedule (should be read from the database in a real implementation)
-        let auto_schedule = Schedule::new(vec![
-            ScheduleEntry {
-                day_of_week: chrono::Weekday::Mon,
-                start_times: vec![(6, chrono::Duration::minutes(30))], // Example: start time at 6:00, 30 min
-            },
-            ScheduleEntry { day_of_week: chrono::Weekday::Wed, start_times: vec![(6, chrono::Duration::minutes(30))] },
-            ScheduleEntry { day_of_week: chrono::Weekday::Fri, start_times: vec![(6, chrono::Duration::minutes(30))] },
-        ]);
+    fn initialize_modes<D: DatabaseTrait>(db: &Arc<D>) -> (ModeAuto, ModeManual, ModeWizard) {
+        // Read schedules from the database
+        let auto_schedule = db.load_auto_schedule().unwrap_or_else(|_| {
+            // Fallback to an empty schedule if the database fails to load
+            Schedule::new(vec![])
+        });
 
-        // Initialize modes
+        // Initialize Auto Mode
         let auto_mode = ModeAuto::new(Cycle::default(), auto_schedule);
+
+        // Initialize Manual Mode
         let manual_mode = ModeManual::new(Cycle::default());
 
-        // Initialize ModeWizard with an empty schedule
-        let wizard_schedule = Schedule::new(vec![]); // Starts with an empty schedule, to be recalculated dynamically
+        // initialize Wizard Schedule
+        let wizard_schedule = Schedule::new(vec![]);
         let wizard_mode = ModeWizard::new(wizard_schedule);
 
         (auto_mode, manual_mode, wizard_mode)
@@ -115,9 +114,8 @@ impl<C: SensorController + 'static> WateringSystem<C> {
                 state_machine.state = WateringState::Idle;
                 state_machine.cycle = None;
             }
-            ControlSignal::Weather(_weather) => {} //TODO:
+            ControlSignal::Weather(_weather) => {}    //TODO:
             ControlSignal::DevicesState(_state) => {} //TODO:
-                                                    // _ => info!("Unhandled signal {:?}", signal),
         }
     }
 
@@ -129,7 +127,7 @@ impl<C: SensorController + 'static> WateringSystem<C> {
     }
 
     pub async fn handle_activating<D: DatabaseTrait + 'static>(
-        &self, duration: chrono::Duration, db: &Arc<D>, event_type: EventType, sector: &SectorInfo,
+        &self, duration: i64, db: &Arc<D>, event_type: EventType, sector: &SectorInfo,
     ) {
         let mut sm = self.state_machine.write().await;
         sm.state = WateringState::Watering(sector.id, duration);
@@ -139,7 +137,7 @@ impl<C: SensorController + 'static> WateringSystem<C> {
         let db_clone = db.clone();
         let sector_clone = sector.clone();
         let sector_id_clone = sector.id;
-        let total_duration_secs = duration.num_seconds();
+        let total_duration_secs = duration;
         let secs = self.sectors.clone();
         let mut elapsed_secs = 0;
 
@@ -216,75 +214,9 @@ impl<C: SensorController + 'static> WateringSystem<C> {
     pub async fn is_idle(&self) -> bool {
         self.state_machine.read().await.is_idle()
     }
-
-    pub fn calculate_deep_watering_schedule(
-        &self, sectors: &[SectorInfo], timeframe: AllowedTimeframe, weekly_target: f64, daily_et: f64, days_remaining: u32,
-    ) -> Vec<(NaiveTime, Vec<(u32, chrono::Duration)>)> {
-        let total_sectors = sectors.len();
-        if total_sectors == 0 || days_remaining == 0 {
-            return vec![]; // No sectors or no days remaining
-        }
-
-        let start = timeframe.start;
-        let end = timeframe.end;
-        let total_available_duration = (end - start).num_seconds().max(1);
-
-        // Adjust each sector's remaining water needs based on ET and percolation
-        let water_needed_per_day = (weekly_target - daily_et * (7 - days_remaining) as f64).max(0.0) / days_remaining as f64;
-
-        let mut sector_durations: Vec<(u32, chrono::Duration)> = sectors
-            .iter()
-            .filter_map(|sector| {
-                let adjusted_target = (water_needed_per_day - sector.percolation_rate).max(0.0);
-                let remaining_water = adjusted_target - sector.progress;
-
-                if remaining_water > 0.0 {
-                    let duration_seconds = ((remaining_water / sector.sprinkler_debit) * 3600.0).ceil() as i64;
-                    let duration = chrono::Duration::seconds(duration_seconds.min(sector.max_duration.num_seconds() as i64));
-                    Some((sector.id, duration))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Sort sectors by their remaining water need (descending) for prioritization
-        sector_durations.sort_by(|(_, d1), (_, d2)| d2.num_seconds().cmp(&d1.num_seconds()));
-
-        let mut schedule = vec![];
-        let mut remaining_duration = total_available_duration;
-
-        // Allocate watering times across sectors
-        let mut current_time = start;
-        while remaining_duration > 0 && !sector_durations.is_empty() {
-            let mut cycle_durations = vec![];
-            let mut cycle_time_used = 0;
-
-            while !sector_durations.is_empty() && cycle_time_used < remaining_duration {
-                let (sector_id, duration) = sector_durations.remove(0);
-
-                if cycle_time_used + duration.num_seconds() <= remaining_duration {
-                    cycle_durations.push((sector_id, duration));
-                    cycle_time_used += duration.num_seconds();
-                } else {
-                    // Partially water the sector
-                    let partial_duration = chrono::Duration::seconds(remaining_duration - cycle_time_used);
-                    cycle_durations.push((sector_id, partial_duration));
-                    sector_durations.insert(0, (sector_id, duration - partial_duration));
-                    break;
-                }
-            }
-
-            schedule.push((current_time, cycle_durations));
-            current_time = current_time + chrono::Duration::seconds(cycle_time_used);
-            remaining_duration -= cycle_time_used;
-        }
-
-        schedule
-    }
 }
 
-pub fn load_sectors(sectors: Vec<SectorInfo>) -> HashMap<u32, SectorInfo> {
+pub fn load_sectors_into_hashmap(sectors: Vec<SectorInfo>) -> HashMap<u32, SectorInfo> {
     let sectors = sectors
         .iter()
         .map(|sector| {
@@ -303,36 +235,43 @@ pub async fn run_watering_system<C: SensorController + 'static, D: DatabaseTrait
     let db_clone = app_state.db.clone();
 
     let mut interval = tokio::time::interval(Duration::from_secs(1));
-    let mut daily_adjustment_done: Option<NaiveDate> = None;
+    let mut daily_adjustment_done: Option<i64> = None;
+
+    let now = chrono::Utc::now().timestamp();
+
+    // Set up a daily timer for adjustments - Wait until midnight
+    let midnight = sod(now) + 86400; // Start of the next day
+    let until_midnight = midnight - now;
+    let mut daily_timer = tokio::time::interval(Duration::from_secs(until_midnight as u64));
+    daily_timer.tick().await;
+
     loop {
-        interval.tick().await;
-        let now = Local::now();
-
-        handle_signals(&ws, rx_signal.clone()).await;
-
-        do_daily_adjustments(&ws, &mut daily_adjustment_done, &db_clone, now).await;
-
-        execute_active_mode(&ws, db_clone.clone(), now).await;
+        let now = chrono::Utc::now().timestamp();
+        tokio::select! {
+            _ = daily_timer.tick() => {
+                do_daily_adjustments(&ws, &mut daily_adjustment_done, &db_clone, now).await;
+            }
+            _ = interval.tick() => {
+                handle_signals(&ws, rx_signal.clone()).await;
+                execute_active_mode(&ws, db_clone.clone(), now).await;
+            }
+        }
     }
 }
 
 async fn do_daily_adjustments<C: SensorController + 'static, D: DatabaseTrait + 'static>(
-    ws: &Arc<WateringSystem<C>>, daily_adjustment_done: &mut Option<NaiveDate>, db: &Arc<D>, now: DateTime<Local>,
+    ws: &Arc<WateringSystem<C>>, daily_adjustment_done: &mut Option<i64>, db: &Arc<D>, now: i64,
 ) {
-    // Perform daily ET adjustment
-    let current_date = now.date_naive();
-
     // Check if adjustments have already been made for the current day
-    if daily_adjustment_done.map_or(true, |last_date| last_date != current_date) {
-        *daily_adjustment_done = Some(current_date);
+    let day_start = sod(now); // Calculate start of the current day
+    if daily_adjustment_done.map_or(true, |last_day| last_day != day_start) {
+        *daily_adjustment_done = Some(now);
 
         let mut wizard_mode = ws.wizard_mode.write().await;
-        wizard_mode.handle_daily_adjustments(ws, db).await;
-        info!("Daily adjustments completed for {:?}", current_date);
-    } 
-    // else {
-    //     debug!("Daily adjustments already completed for {:?}", current_date);
-    // }
+        wizard_mode.handle_daily_adjustments(ws, db, now).await;
+
+        info!("Daily adjustments completed for {:?}", display_from_ts(day_start));
+    }
 }
 
 async fn handle_signals<C: SensorController + 'static>(
@@ -344,26 +283,24 @@ async fn handle_signals<C: SensorController + 'static>(
     }
 }
 
-async fn execute_active_mode<C, D>(watering_system: &Arc<WateringSystem<C>>, db: Arc<D>, now: DateTime<Local>)
+async fn execute_active_mode<C, D>(watering_system: &Arc<WateringSystem<C>>, db: Arc<D>, now: i64)
 where
     C: SensorController + 'static,
     D: DatabaseTrait + 'static,
 {
     let mut active_mode = watering_system.active_mode.write().await;
-    let time = now.time();
     match &mut *active_mode {
         ModeEnum::Wizard(wizard_mode) => {
-            if let Some(next_start) = wizard_mode.calculate_next_start(time, watering_system.timeframe.read().await.clone()) {
-                if time >= next_start {
-                    info!("Wizard Mode: Executing dynamic schedule.");
-                    wizard_mode.execute(watering_system, now.date_naive(), &db).await;
-                }
-            }
+            info!("Wizard Mode: Executing dynamic schedule.");
+            wizard_mode.execute(watering_system, now, &db).await;
         }
         ModeEnum::Auto(auto_mode) => {
-            if time >= watering_system.timeframe.read().await.start && time < watering_system.timeframe.read().await.end {
+            let base_time = sod(now); // Start of the current day
+            let timeframe = *watering_system.timeframe.read().await;
+            // let timeframe = watering_system.timeframe.read().await;
+            if timeframe.is_within(now, base_time) {
                 info!("Auto Mode: Executing auto schedule.");
-                auto_mode.execute(watering_system, &db, now.to_utc()).await;
+                auto_mode.execute(watering_system, &db, now).await;
             }
         }
         ModeEnum::Manual(_) => {
@@ -373,23 +310,4 @@ where
 }
 
 #[cfg(test)]
-mod test {
-
-    use crate::watering::{ds::SectorInfo, mode_wizard::ModeWizard, schedule::Schedule};
-
-    #[tokio::test]
-    async fn test_et_adjustments() {
-        let schedule = Schedule::new(vec![]); // Create an empty schedule for the wizard mode
-        let mut wizard_mode = ModeWizard::new(schedule);
-        let mut sectors = vec![SectorInfo {
-            id: 1,
-            weekly_target: 3.0,
-            progress: 0.5,
-            sprinkler_debit: 1.0,
-            percolation_rate: 0.5,
-            max_duration: chrono::Duration::minutes(30),
-        }];
-
-        wizard_mode.adjust_progress_for_et(&mut sectors.iter_mut().collect::<Vec<&mut SectorInfo>>(), 0.)
-    }
-}
+mod test {}
