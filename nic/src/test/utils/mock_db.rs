@@ -1,21 +1,22 @@
+use crate::db::{DatabaseCommand, DatabaseTrait};
+use crate::error::AppError;
+use crate::sensors::interface::SensorController;
+use crate::time::TimeProvider;
+use crate::utils::{init_channels, sod};
+use crate::watering::ds::{AppState, Cycle, SectorInfo, WaterSector, WateringEvent, WeatherConditions};
+use crate::watering::schedule::{Schedule, ScheduleEntry, ScheduleType};
 use async_trait::async_trait;
-use nic::db::{DatabaseCommand, DatabaseTrait};
-use nic::error::AppError;
-use nic::sensors::interface::SensorController;
-use nic::utils::sod;
-use nic::watering::ds::{AppState, Cycle, SectorInfo, WateringEvent, WeatherConditions};
-use nic::watering::schedule::{Schedule, ScheduleEntry, ScheduleType};
-use nic::watering::watering_system::WateringSystem;
+use chrono::Weekday;
 use rusqlite::Result;
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
-pub async fn new_with_mock<C: SensorController + 'static, D: DatabaseTrait + 'static>(
-    db: Arc<D>, controler: Arc<C>,
-) -> Result<Arc<AppState<C, D>>, AppError> {
-    let watering_system = WateringSystem::new(controler, db.clone()).await?;
-    Ok(Arc::new(AppState { db, watering_system }))
+pub fn new_with_mock<C: SensorController + 'static, D: DatabaseTrait + 'static, T: TimeProvider + 'static>(
+    db: Arc<D>, sensors_ctrl: Arc<C>, time_provider: Arc<T>,
+) -> Result<Arc<AppState<C, D, T>>, AppError> {
+    let (tx, rx) = init_channels();
+    Ok(Arc::new(AppState { db, tx, rx, sensors_ctrl, time_provider }))
 }
 
 #[derive(Clone)]
@@ -27,6 +28,7 @@ pub struct MockDatabase {
 }
 
 impl MockDatabase {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         let data = Arc::new(Mutex::new(HashMap::new()));
@@ -56,7 +58,8 @@ impl MockDatabase {
                     }
                     DatabaseCommand::LoadCycles { response } => {
                         println!("Mock load cycles");
-                        let cycles = vec![Cycle { id: 1, instructions: vec![(1, 30 * 3600)] }];
+                        let cycles = vec![];
+                        // let cycles = vec![Cycle { id: 1, instructions: vec![(1, 30 * 3600)] }];
                         let _ = response.send(Ok(cycles));
                     }
                     DatabaseCommand::LogWateringEvent { evt, response } => {
@@ -108,17 +111,11 @@ fn mock_weather() -> WeatherConditions {
 fn mock_auto_schedule() -> Vec<ScheduleEntry> {
     let entries = vec![
         ScheduleEntry {
-            schedule_type: ScheduleType::Weekday(chrono::Weekday::Mon),
-            start_times: vec![(1, 6 * 3600, 30 * 60), (2, 7 * 3600, 20 * 60)],
+            schedule_type: ScheduleType::Weekday(Weekday::Mon),
+            start_times: vec![WaterSector::new(1, 6 * 3600, 30 * 60), WaterSector::new(2, 7 * 3600, 20 * 60)],
         },
-        ScheduleEntry {
-            schedule_type: ScheduleType::Weekday(chrono::Weekday::Wed),
-            start_times: vec![(3, 8 * 3600, 40 * 60)],
-        },
-        ScheduleEntry {
-            schedule_type: ScheduleType::Weekday(chrono::Weekday::Fri),
-            start_times: vec![(4, 9 * 3600, 50 * 60)],
-        },
+        ScheduleEntry { schedule_type: ScheduleType::Weekday(Weekday::Wed), start_times: vec![WaterSector::new(3, 8 * 3600, 40 * 60)] },
+        ScheduleEntry { schedule_type: ScheduleType::Weekday(Weekday::Fri), start_times: vec![WaterSector::new(4, 9 * 3600, 50 * 60)] },
     ];
     entries
 }
@@ -142,7 +139,8 @@ impl DatabaseTrait for MockDatabase {
     }
 
     fn load_cycles(&self) -> Result<Vec<Cycle>> {
-        Ok(vec![Cycle { id: 1, instructions: vec![(1, 30 * 3600)] }])
+        // Ok(vec![Cycle { id: 1, instructions: vec![(1, 30 * 3600)] }])
+        Ok(vec![])
     }
 
     fn log_watering_event(&self, _evt: WateringEvent) -> Result<()> {

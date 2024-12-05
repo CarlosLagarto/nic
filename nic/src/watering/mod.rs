@@ -1,8 +1,5 @@
 pub mod ds;
-pub mod mode;
-pub mod mode_auto;
-pub mod mode_manual;
-pub mod mode_wizard;
+pub mod modes;
 pub mod schedule;
-pub mod state_machine;
 pub mod watering_system;
+pub mod water_state;

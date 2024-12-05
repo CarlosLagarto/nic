@@ -1,32 +1,43 @@
-use async_trait::async_trait;
 use reqwest;
-use tracing::{debug, error};
+use reqwest::blocking;
+use tracing::debug;
 
-#[async_trait]
+use crate::error::AppError;
+
+pub enum ControlMessage {
+    Activate(u32),
+    Deactivate(u32),
+}
+
 pub trait SensorController: Send + Sync {
-    async fn activate_sector(&self, sector: u32);
-    async fn deactivate_sector(&self, sector: u32);
+    fn activate_sector(&self, sector: u32) -> Result<(), AppError>;
+    fn deactivate_sector(&self, sector: u32) -> Result<(), AppError>;
 }
 
 pub struct RealSensorController;
 
-#[async_trait]
 impl SensorController for RealSensorController {
-    async fn activate_sector(&self, sector: u32) {
+    fn activate_sector(&self, sector: u32) -> Result<(), AppError> {
         let url = format!("http://sensor-system/activate/{}", sector);
-        if let Err(e) = reqwest::get(&url).await {
-            error!("Failed to activate sector {}: {:?}", sector, e);
-        } else {
+        let response = blocking::get(&url)?;
+        if response.status().is_success() {
             debug!("Sector {} activated successfully.", sector);
+            Ok(())
+        } else {
+            Err(AppError::SensorError(format!("Failed to activate sector {}: {:?}", sector, response.status())))
         }
     }
 
-    async fn deactivate_sector(&self, sector: u32) {
+    fn deactivate_sector(&self, sector: u32) -> Result<(), AppError> {
         let url = format!("http://sensor-system/deactivate/{}", sector);
-        if let Err(e) = reqwest::get(&url).await {
-            error!("Failed to deactivate sector {}: {:?}", sector, e);
-        } else {
+        let response = blocking::get(&url)?;
+        if response.status().is_success() {
             debug!("Sector {} deactivated successfully.", sector);
+            Ok(())
+        } else {
+            Err(AppError::SensorError(
+                format!("Failed to deactivate sector {}: {:?}", sector, response.status()),
+            ))
         }
     }
 }

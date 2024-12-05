@@ -1,6 +1,8 @@
-use crate::watering::ds::{Cycle, DailyPlan, SectorInfo, WateringEvent, WeatherConditions, WeeklyPlan};
+use crate::utils::display_from_ts;
+use crate::watering::ds::{Cycle, DailyPlan, SectorInfo, WaterSector, WateringEvent, WeatherConditions, WeeklyPlan};
 use crate::watering::schedule::{Schedule, ScheduleEntry, ScheduleType};
 use async_trait::async_trait;
+use chrono::Weekday;
 use num_traits::FromPrimitive;
 use rusqlite::{params, Connection, Result, ToSql};
 use std::sync::mpsc::{self, Sender};
@@ -17,7 +19,7 @@ pub trait DatabaseTrait: Send + Sync {
     fn get_current_weather(&self) -> Option<WeatherConditions>;
     fn get_lastday_rain(&self, timestamp: i64) -> Option<f64>;
     fn get_daily_et(&self, timestamp: i64) -> Option<f64>;
-    fn load_auto_schedule(&self)->Result<Schedule>;
+    fn load_auto_schedule(&self) -> Result<Schedule>;
 }
 
 pub enum DatabaseCommand {
@@ -179,7 +181,7 @@ impl DatabaseTrait for Database {
 
     fn get_daily_et(&self, time: i64) -> Option<f64> {
         let (response_tx, response_rx) = mpsc::channel();
-        self.sender.send(DatabaseCommand::GetLastdayET { time: time, response: response_tx }).unwrap();
+        self.sender.send(DatabaseCommand::GetLastdayET { time, response: response_tx }).unwrap();
         response_rx.recv().unwrap()
     }
     fn load_auto_schedule(&self) -> Result<Schedule> {
@@ -203,6 +205,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS cycles (
             id INTEGER NOT NULL,
             sector_id INTEGER NOT NULL,
+            start_time INTEGER NOT NULL,
             duration INTEGER NOT NULL,
             PRIMARY KEY (id, sector_id),
             FOREIGN KEY (sector_id) REFERENCES sectors(id)
@@ -212,7 +215,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
             cycle_id INTEGER,
             sector_id INTEGER NOT NULL,
             start_time_utc TEXT NOT NULL,  -- Store as UTC
-            duration INTEGER NOT NULL,
+            duration REAL NOT NULL,
             water_applied REAL NOT NULL,
             type TEXT NOT NULL,
             FOREIGN KEY (sector_id) REFERENCES sectors(id)
@@ -258,15 +261,16 @@ pub fn load_sectors(conn: &Connection) -> Result<Vec<SectorInfo>> {
 }
 
 pub fn load_cycles(conn: &Connection) -> Result<Vec<Cycle>> {
-    let mut stmt = conn.prepare("SELECT id, sector_id, duration FROM cycles ORDER BY id, sector_id")?;
-    let mut cycles_map: std::collections::HashMap<u32, Vec<(u32, i64)>> = std::collections::HashMap::new();
+    let mut stmt = conn.prepare("SELECT id, sector_id, start_time, duration FROM cycles ORDER BY id, sector_id")?;
+    let mut cycles_map: std::collections::HashMap<u32, Vec<WaterSector>> = std::collections::HashMap::new();
 
-    let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)? * 60 as i64)))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)? * 60_i64))
+    })?;
 
     for row in rows {
-        let (cycle_id, sector_id, duration) = row?;
-        cycles_map.entry(cycle_id).or_default().push((sector_id, duration));
+        let (cycle_id, sector_id, start_time, duration) = row?;
+        cycles_map.entry(cycle_id).or_default().push(WaterSector::new(sector_id, start_time, duration));
     }
 
     Ok(cycles_map.into_iter().map(|(id, instructions)| Cycle { id, instructions }).collect())
@@ -277,14 +281,14 @@ pub fn load_auto_schedule(conn: &Connection) -> Result<Schedule> {
         "SELECT day_of_week, sector_id, start_time, duration FROM auto_schedules ORDER BY day_of_week, sector_id, start_time",
     )?;
     // Use a HashMap to group sector and duration entries by day_of_week
-    let mut entries_map: std::collections::HashMap<chrono::Weekday, DailyPlan> = std::collections::HashMap::new();
+    let mut entries_map: std::collections::HashMap<Weekday, DailyPlan> = std::collections::HashMap::new();
 
     let rows = stmt.query_map([], |row| {
         Ok((
             {
                 let week_day = row.get::<_, i64>(0)?;
-                print!("week_day: {:?}", chrono::Weekday::from_i64(week_day));
-                chrono::Weekday::from_i64(week_day).unwrap()
+                print!("week_day: {:?}", Weekday::from_i64(week_day));
+                Weekday::from_i64(week_day).unwrap()
             },
             row.get::<_, u32>(1)?, // Sector ID
             row.get::<_, i64>(2)?, // Start time
@@ -294,7 +298,7 @@ pub fn load_auto_schedule(conn: &Connection) -> Result<Schedule> {
 
     for row in rows {
         let (day_of_week, sector_id, start_time, duration) = row?;
-        entries_map.entry(day_of_week).or_default().push((sector_id, start_time, duration));
+        entries_map.entry(day_of_week).or_default().push(WaterSector::new(sector_id, start_time, duration));
     }
 
     // Convert the HashMap into a Vec<ScheduleEntry>
@@ -315,10 +319,10 @@ pub fn save_auto_schedule(conn: &mut Connection, schedule: &Schedule) -> rusqlit
 
     for entry in &schedule.entries {
         if let ScheduleType::Weekday(day_of_week) = entry.schedule_type {
-            for &(sector_id, start_time, duration) in &entry.start_times {
+            for &sec in &entry.start_times {
                 tx.execute(
                     "INSERT INTO auto_schedules (day_of_week, sector_id, start_time, duration) VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![day_of_week.num_days_from_monday(), sector_id, start_time, duration],
+                    rusqlite::params![day_of_week.num_days_from_monday(), sec.id, sec.start, sec.duration],
                 )?;
             }
         }
@@ -331,10 +335,10 @@ pub fn store_plan_in_db(conn: &mut Connection, weekly_plan: &WeeklyPlan) -> rusq
     let tx = conn.transaction()?;
     tx.execute_batch("DELETE FROM wizard_schedule")?; // Clear previous schedule
     for (date, sessions) in weekly_plan {
-        for (sector_id, start_time, duration) in sessions {
+        for sec in sessions {
             tx.execute(
                 "INSERT INTO wizard_schedule (date, sector_id, start_time, duration) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![date, sector_id, start_time, duration],
+                rusqlite::params![date, sec.id, sec.start, sec.duration],
             )?;
         }
     }
@@ -348,11 +352,11 @@ pub fn log_watering_event(conn: &Connection, evt: WateringEvent) -> Result<()> {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             evt.cycle_id,
-            evt.sector_id,
-            evt.start_time,
-            evt.duration.num_minutes(),
+            evt.sector.id,
+            display_from_ts(evt.sector.start),
+            evt.sector.duration as f64 / 60.,
             evt.water_applied,
-            evt.event_type.to_string()
+            evt.mode.to_string()
         ],
     )?;
     Ok(())
@@ -387,7 +391,12 @@ pub fn get_lastday_et(_time: i64) -> Option<f64> {
 
 #[cfg(test)]
 mod test {
-    use crate::{db::load_auto_schedule, watering::schedule::ScheduleType};
+    use chrono::Weekday;
+
+    use crate::{
+        db::load_auto_schedule,
+        watering::{ds::WaterSector, schedule::ScheduleType},
+    };
 
     #[test]
     fn test_load_auto_schedule() {
@@ -426,22 +435,22 @@ mod test {
         let monday_schedule = schedule
             .entries
             .iter()
-            .find(|entry| matches!(entry.schedule_type, ScheduleType::Weekday(chrono::Weekday::Mon)))
+            .find(|entry| matches!(entry.schedule_type, ScheduleType::Weekday(Weekday::Mon)))
             .unwrap();
         assert_eq!(
             monday_schedule.start_times,
-            vec![(101, 21600, 1800), (102, 28800, 3600)] // Verify start times and durations
+            vec![WaterSector::new(101, 21600, 1800), WaterSector::new(102, 28800, 3600)] // Verify start times and durations
         );
 
         // Check Tuesday's schedule
         let tuesday_schedule = schedule
             .entries
             .iter()
-            .find(|entry| matches!(entry.schedule_type, ScheduleType::Weekday(chrono::Weekday::Tue)))
+            .find(|entry| matches!(entry.schedule_type, ScheduleType::Weekday(Weekday::Tue)))
             .unwrap();
         assert_eq!(
             tuesday_schedule.start_times,
-            vec![(201, 18000, 1200)] // Verify start time and duration
+            vec![WaterSector::new(201, 18000, 1200)] // Verify start time and duration
         );
     }
 }

@@ -4,30 +4,30 @@ use axum_server::Server;
 use nic::api::{get_cycle, get_state, send_command, switch_to_auto, switch_to_manual, switch_to_wizard};
 use nic::db::Database;
 use nic::sensors::interface::RealSensorController;
-use nic::utils::start_log;
-use nic::watering::ds::{AppState, ControlSignal};
+use nic::time::RealTimeProvider;
+use nic::utils::{init_channels, start_log};
+use nic::watering::ds::AppState;
+use nic::watering::modes::ModeIdx;
 use nic::watering::watering_system::run_watering_system;
 use nic::weather;
 use std::{error::Error, sync::Arc};
-use tokio::sync::{broadcast, Mutex};
 use tracing::{debug, info};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    start_log();
+    start_log::<RealTimeProvider>(None);
 
     info!("Starting application...");
     debug!("test");
 
     let db = Arc::new(Database::new("watering_system.db")?);
 
-    // Broadcast channel for real-time updates
-    let (tx, rx) = broadcast::channel::<ControlSignal>(100);
-    let tx = Arc::new(tx);
-    let rx = Arc::new(Mutex::new(rx));
+    let (tx, rx) = init_channels();
 
     let controller = Arc::new(RealSensorController {});
-    let app_state = AppState::new(db.clone(), controller).await?;
+    let time_provider = Arc::new(RealTimeProvider);
+    // TODO: read from config and db, in case is not a fresh start
+    let app_state = AppState::new(db.clone(), controller, time_provider, tx.clone(), rx).await?;
 
     tokio::spawn(weather::mqtt_mon::monitor_mqtt(tx.clone()));
     tokio::spawn(weather::mqtt_mon::monitor_udp(tx.clone(), db.clone()));
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Start watering system loop
     tokio::spawn(async move {
-        run_watering_system(app_state.clone(), rx).await;
+        _ = run_watering_system(app_state.clone(), Some(ModeIdx::Auto), None, None).await; // TODO
     });
 
     info!("Starting HTTP server on http://0.0.0.0:8080");

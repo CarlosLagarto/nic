@@ -1,20 +1,23 @@
 use chrono::Datelike;
 use nic::{
-    utils::{display_from_ts, sod},
+    test::utils::{mock_db::MockDatabase, set_ws0},
+    time::TimeProvider,
+    utils::{display_from_ts, load_sectors_into_hashmap, sod},
     watering::{
-        ds::{Cycle, SectorInfo, WateringState},
+        ds::{Cycle, SectorInfo, WaterSector, WateringState},
+        modes::ModeIdx,
         schedule::{Schedule, ScheduleEntry, ScheduleType},
-        state_machine::WateringStateMachine,
-        watering_system::load_sectors_into_hashmap,
+        water_state::WaterState,
     },
 };
-use test_utilities::common::set_app_state1;
+use std::sync::Arc;
 
 #[test]
-fn test_start_cycle() {
-    let mut state_machine = WateringStateMachine::new();
-
-    let cycle = Cycle { id: 1, instructions: vec![(1, 30 * 3600)] };
+fn start_cycle() {
+    let sectors = vec![SectorInfo::build(1, 2.5, 1., 30 * 60, 0., 0.5)];
+    let mut state_machine = WaterState::new(None, sectors);
+    let sec = WaterSector::new(1, 0, 30 * 3600);
+    let cycle = Cycle { id: 1, instructions: vec![sec] };
     state_machine.start_cycle(cycle.clone());
 
     assert_eq!(state_machine.cycle, Some(cycle));
@@ -23,105 +26,79 @@ fn test_start_cycle() {
 }
 
 #[tokio::test]
-async fn test_scheduler_triggers_auto_mode() {
-    let app_state = set_app_state1().await;
-    let sectors = load_sectors_into_hashmap(vec![SectorInfo::build(1, 2.5, 1., 30 * 60, 0., 0.5)]);
-    *app_state.watering_system.sectors.write().await = sectors;
-
+async fn scheduler_triggers_auto_mode() {
     let now = chrono::Utc::now().timestamp();
+    let mock_db = Some(Arc::new(MockDatabase::new()));
+    let mut ws = set_ws0(now, Some(ModeIdx::Auto), mock_db).unwrap();
+    let time_provider = ws.time_provider.clone();
+
+    let sectors = load_sectors_into_hashmap(vec![SectorInfo::build(1, 2.5, 1., 30 * 60, 0., 0.5)]);
+    ws.water_state.sectors = sectors;
+
     let base_time = sod(now);
     let sec_start_time = base_time + (22 * 3600); // 10:00 PM today
     let today_weekday = chrono::Utc::now().weekday(); // Dynamically get the current weekday
 
     println!("Sector start: {}", display_from_ts(sec_start_time));
+    let sec = WaterSector::new(1, sec_start_time, 30 * 60);
     // Initialize Auto Mode with a schedule
     let schedule_entries = vec![ScheduleEntry {
         schedule_type: ScheduleType::Weekday(today_weekday),
-        start_times: vec![(1, sec_start_time, 30 * 60)], // Sector 1: Starts 1 minute from now, 30 minutes duration
+        start_times: vec![sec], // Sector 1: Starts 1 minute from now, 30 minutes duration
     }];
-    {
-        let mut auto_mode = app_state.watering_system.auto_mode.write().await;
-        auto_mode.schedule = Schedule::new(schedule_entries);
-    }
+    ws.water_state.mode_auto.schedule = Schedule::new(schedule_entries);
     // Simulate `run_watering_system` loop for scheduling
-    let task = tokio::spawn({
-        let app_state = app_state.clone();
-        async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
-            let mut simulated_time = sec_start_time - 1; // Start simulation slightly before the schedule
-
-            for _ in 0..5 {
-                let timeframe = app_state.watering_system.timeframe.read().await;
-                println!("Simulated time: {}", display_from_ts(simulated_time));
-                interval.tick().await;
-                // Execute Auto Mode if within timeframe
-                if timeframe.is_within(simulated_time, base_time) {
-                    let auto_mode = app_state.watering_system.auto_mode.write().await;
-                    auto_mode.execute(&app_state.watering_system, &app_state.db, simulated_time).await;
-                }
-                simulated_time += 1; // Simulate time passing
-            }
+    time_provider.set(sec_start_time - 1); // Start simulation slightly before the schedule
+    for _ in 0..5 {
+        println!("Simulated time: {}", display_from_ts(time_provider.now()));
+        // Execute Auto Mode if within timeframe
+        let now = time_provider.now();
+        if ws.water_state.timeframe.is_within(now, base_time) {
+            ws.execute_active_mode(now).await;
         }
-    });
-
-    let _ = task.await;
+        time_provider.advance_time(1); // Simulate time passing
+    }
 
     // Validate the state machine
-    let sm = app_state.watering_system.state_machine.read().await;
-    assert!(sm.cycle.is_some(), "Cycle should be active in Auto Mode.");
-    assert_eq!(sm.cycle.as_ref().unwrap().instructions.len(), 1, "Cycle should contain one instruction.");
+    assert!(ws.water_state.cycle.is_some(), "Cycle should be active in Auto Mode.");
+    assert_eq!(ws.water_state.cycle.as_ref().unwrap().instructions.len(), 1, "Cycle should contain one instruction.");
     assert_eq!(
-        sm.cycle.as_ref().unwrap().instructions[0],
-        (1, 30 * 60),
+        ws.water_state.cycle.as_ref().unwrap().instructions[0],
+        sec,
         "Cycle should target sector 1 with the correct duration."
     );
 }
 
 #[tokio::test]
-async fn test_scheduler_triggers_wizard_mode() {
-    let app_state = set_app_state1().await;
-    let sectors = load_sectors_into_hashmap(vec![SectorInfo::build(1, 2.5, 1., 30 * 60, 0., 0.5)]);
-    *app_state.watering_system.sectors.write().await = sectors;
-
-
+async fn scheduler_triggers_wizard_mode() {
     let now = chrono::Utc::now().timestamp();
+    let mock_db = Some(Arc::new(MockDatabase::new()));
+    let mut ws = set_ws0(now, Some(ModeIdx::Wizard), mock_db).unwrap();
+    let time_provider = ws.time_provider.clone();
+
     let base_time = sod(now);
     let sec_start_time = base_time + (22 * 3600); // 10:00 PM today
+
     // Initialize Wizard Mode with a schedule
+    let sec = WaterSector::new(1, sec_start_time, 30 * 60);
     let schedule_entries = vec![ScheduleEntry {
         schedule_type: ScheduleType::Date(sod(now)), // Today's start of day
-        start_times: vec![(1, sec_start_time, 30 * 60)], // Sector 1, 30 minutes duration
+        start_times: vec![sec],                      // Sector 1, 30 minutes duration
     }];
-    {
-        let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
-        wizard_mode.schedule = Schedule::new(schedule_entries);
+    ws.water_state.mode_wizard.schedule = Schedule::new(schedule_entries);
+    // Simulate time passing for Wizard Mode
+    time_provider.set(sec_start_time - 1); // Start simulation slightly before the schedule
+    for _ in 0..5 {
+        ws.execute_active_mode(time_provider.now()).await;
+        time_provider.advance_time(1);
     }
 
-    // Simulate time passing for Wizard Mode
-    let task = tokio::spawn({
-        let app_state = app_state.clone();
-        async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
-            let mut simulated_time = sec_start_time - 1; // Start simulation slightly before the schedule
-            for _ in 0..5 {
-                interval.tick().await;
-            
-                let mut wizard_mode = app_state.watering_system.wizard_mode.write().await;
-                wizard_mode.execute(&app_state.watering_system, simulated_time, &app_state.db).await;
-                simulated_time += 1;
-            }
-        }
-    });
-
-    let _ = task.await;
-
     // Validate the state machine
-    let sm = app_state.watering_system.state_machine.read().await;
-    assert!(sm.cycle.is_some(), "Cycle should be active in Wizard Mode.");
-    assert_eq!(sm.cycle.as_ref().unwrap().instructions.len(), 1, "Cycle should contain one instruction.");
+    assert!(ws.water_state.cycle.is_some(), "Cycle should be active in Wizard Mode.");
+    assert_eq!(ws.water_state.cycle.as_ref().unwrap().instructions.len(), 1, "Cycle should contain one instruction.");
     assert_eq!(
-        sm.cycle.as_ref().unwrap().instructions[0],
-        (1, 30 * 60),
+        ws.water_state.cycle.as_ref().unwrap().instructions[0],
+        sec,
         "Cycle should target sector 1 with the correct duration."
     );
 }

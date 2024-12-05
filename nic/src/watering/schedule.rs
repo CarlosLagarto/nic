@@ -1,6 +1,5 @@
-use super::ds::{DailyPlan, SectorInfo};
-use crate::utils::sod;
-use chrono::{Datelike, TimeZone};
+use super::ds::{DailyPlan, SectorInfo, WaterSector};
+use crate::utils::{get_week_day_from_ts, sod};
 use tracing::info;
 
 #[derive(Debug, Clone, Copy)]
@@ -65,25 +64,27 @@ impl Schedule {
         Self { entries }
     }
 
-    pub fn get_next_wizard_schedule(&self, timestamp: i64) -> Option<&DailyPlan> {
+
+    pub fn get_next_wizard_schedule(&self, timestamp: i64) -> Option<DailyPlan> {
         let day_start = sod(timestamp); // 86,400 seconds in a day
+
 
         self.entries
             .iter()
-            .find(|entry| match &entry.schedule_type {
-                ScheduleType::Date(day) => *day == day_start,
-                _ => false,
+            .filter_map(|entry| match &entry.schedule_type {
+                ScheduleType::Date(date) if *date == day_start => {
+                    // Return all valid start_times for the specific date
+                    Some(
+                        entry.start_times.iter().filter(|sec| sec.start + sec.duration >= timestamp).cloned().collect(),
+                    )
+                }
+                _ => None,
             })
-            .map(|entry| &entry.start_times)
-            .filter(|plan| {
-                // Filter out sessions where the current time is after their end time
-                plan.iter().any(|(_, start_time, duration)| timestamp <= *start_time + *duration)
-            })
+            .next() // Get the first matching schedule
     }
 
-    pub fn get_next_auto_schedule(&self, current_time: i64) -> Option<(u32, i64, i64)> {
-        let now = chrono::Utc.timestamp_opt(current_time, 0).unwrap();
-        let weekday = now.weekday();
+    pub fn get_next_auto_schedule(&self, current_time: i64) -> Option<WaterSector> {
+        let weekday = get_week_day_from_ts(current_time);
 
         // Find the next schedule entry for the current or subsequent weekdays
         self.entries
@@ -93,13 +94,7 @@ impl Schedule {
                     entry
                         .start_times
                         .iter()
-                        .filter_map(|&(sector_id, start_time, duration)| {
-                            if start_time >= current_time {
-                                Some((sector_id, start_time, duration)) // Return sector_id, start_time, and duration
-                            } else {
-                                None
-                            }
-                        })
+                        .filter_map(|&sec| if sec.start >= current_time { Some(sec) } else { None })
                         .min() // Get the earliest valid start_time
                 }
                 _ => None, // Ignore wizard mode entries
@@ -127,21 +122,20 @@ impl WateringSchedule {
         let irrigation_duration = sector.weekly_target - sector.progress; // Total water needed in cm
         let irrigation_time = ((irrigation_duration / sector.sprinkler_debit) * 3600.0) as i64;
         if irrigation_time <= 0 {
-            None // No watering needed; target met
-        } else {
-            let soil_capacity_cm = 2.5; // Temporary holding capacity in cm
-            let extra_time_seconds = (soil_capacity_cm / sector.sprinkler_debit) * 3600.0;
-
-            let tolerance_factor = 1.2; // Allow 20% tolerance
-            let adjusted_percolation_rate = sector.percolation_rate * tolerance_factor;
-            let max_percolation_time_seconds = ((adjusted_percolation_rate / 10.0) / sector.sprinkler_debit) * 3600.0;
-
-            let adjusted_percolation_time = (max_percolation_time_seconds + extra_time_seconds) as i64;
-
-            let empirical_cap = sector.max_duration; // Empirical cap, typical is 30 minutes
-
-            Some(irrigation_time.min(adjusted_percolation_time).min(empirical_cap))
+            return None; // No watering needed; target met
         }
+        let soil_capacity_cm = 2.5; // Temporary holding capacity in cm
+        let extra_time_seconds = (soil_capacity_cm / sector.sprinkler_debit) * 3600.0;
+
+        let tolerance_factor = 1.2; // Allow 20% tolerance
+        let adjusted_percolation_rate = sector.percolation_rate * tolerance_factor;
+        let max_percolation_time_seconds = ((adjusted_percolation_rate / 10.0) / sector.sprinkler_debit) * 3600.0;
+
+        let adjusted_percolation_time = (max_percolation_time_seconds + extra_time_seconds) as i64;
+
+        let empirical_cap = sector.max_duration; // Empirical cap, typical is 30 minutes
+
+        Some(irrigation_time.min(adjusted_percolation_time).min(empirical_cap))
     }
 
     pub fn recalculate_remaining_plan(
@@ -178,7 +172,7 @@ impl WateringSchedule {
                 let day_timestamp = start_of_day + (day as i64 * 86_400); // Add days in seconds
                 (
                     day_timestamp, // Unix UTC timestamp for the start of the day
-                    daily_plan.into_iter().map(|tuple| tuple).collect(),
+                    daily_plan.into_iter().collect(),
                 )
             })
             .collect()
@@ -203,6 +197,7 @@ impl WateringSchedule {
                 current_time = start_time;
             }
 
+            // let acc = current_time;
             for sector in sectors {
                 let remaining_target = sector.weekly_target - sector.progress;
                 if remaining_target > 0.0 {
@@ -215,8 +210,9 @@ impl WateringSchedule {
                         let actual_duration = duration.min(sector.max_duration);
 
                         // Add session to the daily plan if it fits within the timeframe
-                        if current_time + actual_duration <= end_time {
-                            daily_plan.push((sector.id, current_time, actual_duration));
+                        if current_time + actual_duration + 20 <= end_time {
+                            //TODO const for safe factor
+                            daily_plan.push(WaterSector::new(sector.id, current_time, actual_duration));
                             current_time += actual_duration;
                         } else {
                             break; // Stop adding sessions if no more time is available
@@ -233,15 +229,15 @@ impl WateringSchedule {
 
 #[cfg(test)]
 mod test {
-    use chrono::TimeZone;
+    use chrono::{TimeZone, Weekday};
 
-    use crate::watering::{
-        ds::SectorInfo,
-        schedule::{AllowedTimeframe, WateringSchedule},
-    };
+    use crate::{utils::sod, watering::{
+        ds::{SectorInfo, WaterSector},
+        schedule::{AllowedTimeframe, Schedule, ScheduleEntry, ScheduleType, WateringSchedule},
+    }};
 
     #[test]
-    fn test_allowed_timeframe() {
+    fn allowed_timeframe() {
         // Example: Define a timeframe from 6:00 AM to 8:00 AM (2 hours)
         let timeframe = AllowedTimeframe::new(6, 2);
 
@@ -269,7 +265,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_et_adjustments() {
+    async fn et_adjustments() {
         let mut sectors = vec![SectorInfo::build(1, 3., 1., 30 * 60, 0.5, 0.5)];
 
         WateringSchedule::adjust_progress_for_et_and_rain(
@@ -278,4 +274,94 @@ mod test {
             0.5,
         )
     }
+
+    #[test]
+    fn get_next_auto_schedule() {
+        // Create a schedule with mixed ScheduleType entries (Weekday and Date)
+        let entries = vec![
+            ScheduleEntry {
+                schedule_type: ScheduleType::Weekday(Weekday::Mon),
+                start_times: vec![
+                    WaterSector { id: 1, start: 1667836800, duration: 3600 }, // Example Monday timestamp
+                ],
+            },
+            ScheduleEntry {
+                schedule_type: ScheduleType::Date(1667923200), // Specific date
+                start_times: vec![
+                    WaterSector { id: 2, start: 1667923200, duration: 3600 }, // Example specific date timestamp
+                ],
+            },
+            ScheduleEntry {
+                schedule_type: ScheduleType::Weekday(Weekday::Tue),
+                start_times: vec![
+                    WaterSector { id: 3, start: 1667926800, duration: 3600 }, // Example Tuesday timestamp
+                ],
+            },
+        ];
+
+        // Create a schedule instance
+        let schedule = Schedule { entries };
+
+        // Simulate a Monday timestamp
+        let monday_timestamp = 1667836800; // Example Monday timestamp
+        let next_schedule = schedule.get_next_auto_schedule(monday_timestamp);
+
+        // Expected result: The earliest entry for Monday
+        assert_eq!(next_schedule, Some(WaterSector { id: 1, start: 1667836800, duration: 3600 }));
+
+        // Simulate a timestamp on the specific date (should be ignored for auto mode)
+        let date_specific_timestamp = 1667923200; // Example timestamp for the specific date
+        let next_schedule = schedule.get_next_auto_schedule(date_specific_timestamp);
+
+        // Expected result: The Tuesday entry since the Date entry should be ignored
+        assert_eq!(next_schedule, Some(WaterSector { id: 3, start: 1667926800, duration: 3600 }));
+
+        // Simulate a Tuesday timestamp
+        let tuesday_timestamp = 1667926800; // Example Tuesday timestamp
+        let next_schedule = schedule.get_next_auto_schedule(tuesday_timestamp);
+
+        // Expected result: The Tuesday entry
+        assert_eq!(next_schedule, Some(WaterSector { id: 3, start: 1667926800, duration: 3600 }));
+
+        // Simulate a timestamp after all entries
+        let late_tuesday_timestamp = 1667930400; // After Tuesday's entry
+        let next_schedule = schedule.get_next_auto_schedule(late_tuesday_timestamp);
+
+        // Expected result: No valid entries
+        assert_eq!(next_schedule, None);
+    }
+
+    #[test]
+    fn get_next_wizard_schedule() {
+        // Create a schedule with specific dates
+        let schedule_entries = vec![ScheduleEntry {
+            schedule_type: ScheduleType::Date(sod(1692508800)), // Unix UTC timestamp for the start of the day
+            start_times: vec![
+                WaterSector::new(1, 1692512400, 30 * 60), // Sector 1, starts at 02:00 UTC, duration 30 min
+                WaterSector::new(2, 1692519600, 20 * 60), // Sector 2, starts at 04:00 UTC, duration 20 min
+                WaterSector::new(3, 1692526800, 45 * 60), // Sector 3, starts at 06:00 UTC, duration 45 min
+            ],
+        }];
+
+        let schedule = Schedule::new(schedule_entries);
+
+        // Test for a specific day
+        let current_time = 1692516000; // 03:00 UTC on the same day
+        let result = schedule.get_next_wizard_schedule(current_time);
+
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap(),
+            vec![
+                // WaterSector::new(1, 1692512400, 30 * 60), // Sector 1, starts at 02:00 UTC, duration 30 min
+                WaterSector::new(2, 1692519600, 20 * 60), // Sector 2, starts at 04:00 UTC, duration 20 min
+                WaterSector::new(3, 1692526800, 45 * 60), // Sector 3, starts at 06:00 UTC, duration 45 min
+            ]
+        );
+
+        // Test for a day with no schedule
+        let current_time = 1692595200; // A different day
+        assert!(schedule.get_next_wizard_schedule(current_time).is_none());
+    }
+
 }

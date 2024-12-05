@@ -4,6 +4,8 @@ use thiserror::Error;
 pub enum AppError {
     #[error("Database error: {0}")]
     DatabaseError(#[from] rusqlite::Error),
+    #[error("HTTP error: {0}")]
+    HTTPError(#[from] reqwest::Error),
     #[error("Sensor error: {0}")]
     SensorError(String),
     #[error("Watering error: {0}")]

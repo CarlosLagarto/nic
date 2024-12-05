@@ -1,0 +1,179 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'nic'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "nic",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'nic'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=nic",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "nic",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'nic'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=nic",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "nic",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'mode_switch'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=mode_switch",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "mode_switch",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'mode_wizard'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=mode_wizard",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "mode_wizard",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'signal_handling'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=signal_handling",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "signal_handling",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'state_machine'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=state_machine",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "state_machine",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'switch_signals'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=switch_signals",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "switch_signals",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'watering'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--no-capture",
+                    "--test=watering",
+                    "--package=nic"
+                ],
+                "filter": {
+                    "name": "watering",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

@@ -1,9 +1,18 @@
-use super::watering_system::WateringSystem;
-use crate::{db::DatabaseTrait, error::AppError, sensors::interface::SensorController};
-use chrono::Duration;
+use super::modes::ModeIdx;
+use crate::{
+    api::{CycleResponse, WateringStateResponse},
+    db::DatabaseTrait,
+    error::AppError,
+    sensors::interface::SensorController,
+    time::TimeProvider,
+};
 use std::sync::Arc;
+use tokio::sync::{
+    broadcast::{Receiver, Sender},
+    Mutex,
+};
 
-pub type DailyPlan = Vec<(u32, i64, i64)>; // A day's plan: (sector_id , start time,  duration)
+pub type DailyPlan = Vec<WaterSector>; // A day's plan: (sector_id , start time,  duration)
 pub type WeeklyPlan = Vec<(i64, DailyPlan)>; // A week's plan: date -> daily plan
 
 #[derive(Debug, Clone)]
@@ -29,18 +38,42 @@ impl SectorInfo {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Ord, PartialOrd, Eq)]
+pub struct WaterSector {
+    pub id: u32,
+    pub start: i64,
+    pub duration: i64,
+}
+
+impl WaterSector {
+    pub fn new(id: u32, start: i64, duration: i64) -> Self {
+        Self { id, start, duration }
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Cycle {
     pub id: u32,
-    pub instructions: Vec<(u32, i64)>, // (Sector ID, Duration)
+    pub instructions: Vec<WaterSector>, // (Sector ID, Duration)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WateringState {
-    Idle,               // No active watering
-    Activating(u32),    // Activating a sector
-    Watering(u32, i64), // Actively watering (sector ID, duration)
-    Deactivating(u32),  // Deactivating a sector
+    Idle,                      // No active watering
+    Activating(WaterSector),   // Activating a sector (sector id, start time, duration)
+    Watering(WaterSector),     // Actively watering (sector ID, start time, duration)
+    Deactivating(WaterSector), // Deactivating a sector
+}
+
+impl WateringState {
+    pub fn get_current_sector_id(&self) -> Option<u32> {
+        match self {
+            WateringState::Activating(sec) => Some(sec.id),
+            WateringState::Watering(sec) => Some(sec.id),
+            WateringState::Deactivating(sec) => Some(sec.id),
+            _ => None, // Idle or other states that don't involve a specific sector
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +92,10 @@ pub enum ControlSignal {
     SwitchToAuto,
     SwitchToManual,
     SwitchToWizard,
+    GetState,
+    GetStateResponse(WateringStateResponse),
+    GetCycle,
+    GetCycleResponse(CycleResponse),
 }
 
 pub struct WeatherConditions {
@@ -69,50 +106,33 @@ pub struct WeatherConditions {
     pub solar_radiation: f64,
 }
 
-pub struct AppState<C: SensorController, D: DatabaseTrait> {
+pub struct AppState<C: SensorController, D: DatabaseTrait, T: TimeProvider> {
     pub db: Arc<D>,
-    pub watering_system: Arc<WateringSystem<C>>,
+    pub tx: Arc<Sender<ControlSignal>>,
+    pub rx: Arc<Mutex<Receiver<ControlSignal>>>,
+    pub sensors_ctrl: Arc<C>,
+    pub time_provider: Arc<T>,
 }
 
-impl<C: SensorController + 'static, D: DatabaseTrait + 'static> AppState<C, D> {
-    pub async fn new(db: Arc<D>, sensors_ctrl: Arc<C>) -> Result<Arc<Self>, AppError> {
-        let watering_system = WateringSystem::new(sensors_ctrl, db.clone()).await?;
-        Ok(Arc::new(AppState { db, watering_system }))
+impl<C: SensorController + 'static, D: DatabaseTrait + 'static, T: TimeProvider + 'static> AppState<C, D, T> {
+    pub async fn new(
+        db: Arc<D>, sensors_ctrl: Arc<C>, time_provider: Arc<T>, tx: Arc<Sender<ControlSignal>>,
+        rx: Arc<Mutex<Receiver<ControlSignal>>>,
+    ) -> Result<Arc<Self>, AppError> {
+        Ok(Arc::new(AppState { db, tx, rx, sensors_ctrl, time_provider }))
     }
 }
 
 #[derive(Debug)]
 pub struct WateringEvent {
     pub cycle_id: Option<u32>,
-    pub sector_id: u32,
-    pub start_time: String,
-    pub duration: Duration,
+    pub sector: WaterSector,
     pub water_applied: f64,
-    pub event_type: EventType,
+    pub mode: ModeIdx,
 }
 
 impl WateringEvent {
-    pub fn new(
-        cycle_id: Option<u32>, sector_id: u32, start_time: String, duration: Duration, water_applied: f64,
-        event_type: EventType,
-    ) -> Self {
-        Self { cycle_id, sector_id, start_time, duration, water_applied, event_type }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EventType {
-    Auto,
-    Manual,
-    Wizard,
-}
-
-impl ToString for EventType {
-    fn to_string(&self) -> String {
-        match self {
-            EventType::Auto => "auto".to_string(),
-            EventType::Manual => "manual".to_string(),
-            EventType::Wizard => "wizard".to_string(),
-        }
+    pub fn new(cycle_id: Option<u32>, sector: WaterSector, water_applied: f64, mode: ModeIdx) -> Self {
+        Self { cycle_id, sector, water_applied, mode }
     }
 }

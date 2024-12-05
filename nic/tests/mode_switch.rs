@@ -1,111 +1,42 @@
-use nic::watering::mode::ModeEnum;
+use nic::{test::utils::set_ws0, watering::modes::ModeIdx};
 
-use test_utilities::common::set_app_state;
+#[test]
+fn mode_switching() {
+    let mut ws = set_ws0(0, None, None).unwrap();
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Auto);
 
-#[tokio::test]
-async fn test_mode_switching() {
-    let app_state = set_app_state().await;
-
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Auto(_)
-    ));
-
-    let manual_mode = app_state.watering_system.manual_mode.read().await.clone();
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Manual(manual_mode))
-        .await;
-
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Manual(_)
-    ));
+    ws.water_state.switch_mode(ModeIdx::Manual);
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Manual);
 }
 
-#[tokio::test]
-async fn test_all_mode_transitions() {
-    let app_state = set_app_state().await;
-
+#[test]
+fn all_mode_transitions() {
+    let mut ws = set_ws0(0, None, None).unwrap();
     // Initially in Auto mode
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Auto(_)
-    ));
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Auto);
 
     // Transition from Auto -> Manual
-    let manual_mode = app_state.watering_system.manual_mode.read().await.clone();
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Manual(manual_mode))
-        .await;
-
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Manual(_)
-    ));
+    ws.water_state.switch_mode(ModeIdx::Manual);
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Manual);
 
     // Transition from Manual -> Wizard
-    let wizard_mode = app_state.watering_system.wizard_mode.read().await.clone();
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Wizard(wizard_mode))
-        .await;
-
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Wizard(_)
-    ));
+    ws.water_state.switch_mode(ModeIdx::Wizard);
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Wizard);
 
     // Transition from Wizard -> Auto
-    let auto_mode = app_state.watering_system.auto_mode.read().await.clone();
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Auto(auto_mode))
-        .await;
-
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Auto(_)
-    ));
+    ws.water_state.switch_mode(ModeIdx::Auto);
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Auto);
 
     // Additional transitions to verify no unexpected behavior:
     // Auto -> Wizard
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Wizard(
-            app_state.watering_system.wizard_mode.read().await.clone(),
-        ))
-        .await;
-
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Wizard(_)
-    ));
+    ws.water_state.switch_mode(ModeIdx::Wizard);
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Wizard);
 
     // Wizard -> Manual
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Manual(
-            app_state.watering_system.manual_mode.read().await.clone(),
-        ))
-        .await;
-
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Manual(_)
-    ));
+    ws.water_state.switch_mode(ModeIdx::Manual);
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Manual);
 
     // Manual -> Auto
-    app_state
-        .watering_system
-        .switch_mode(ModeEnum::Auto(
-            app_state.watering_system.auto_mode.read().await.clone(),
-        ))
-        .await;
-
-    assert!(matches!(
-        *app_state.watering_system.active_mode.read().await,
-        ModeEnum::Auto(_)
-    ));
+    ws.water_state.switch_mode(ModeIdx::Auto);
+    assert_eq!(ws.water_state.active_mode, ModeIdx::Auto);
 }
