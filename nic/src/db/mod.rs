@@ -1,15 +1,16 @@
-use crate::utils::display_from_ts;
+use crate::utils::ux_ts_to_string;
 use crate::watering::ds::{Cycle, DailyPlan, SectorInfo, WaterSector, WateringEvent, WeatherConditions, WeeklyPlan};
-use crate::watering::schedule::{Schedule, ScheduleEntry, ScheduleType};
+use crate::watering::watering_alg::{Schedule, ScheduleEntry, ScheduleType};
 use async_trait::async_trait;
 use chrono::Weekday;
 use num_traits::FromPrimitive;
 use rusqlite::{params, Connection, Result, ToSql};
+use std::fmt::Debug;
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
 #[async_trait]
-pub trait DatabaseTrait: Send + Sync {
+pub trait DatabaseTrait: Send + Sync + Debug {
     fn execute(&self, query: &str, params: Vec<Box<dyn rusqlite::ToSql + Send>>) -> Result<usize>;
     fn execute_batch(&self, query: &str) -> Result<()>;
     fn query_row(&self, query: &str, params: Vec<Box<dyn rusqlite::ToSql + Send>>) -> Result<String>;
@@ -63,7 +64,7 @@ pub enum DatabaseCommand {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Database {
     pub sender: Sender<DatabaseCommand>,
 }
@@ -199,7 +200,8 @@ pub fn initialize(conn: &Connection) -> Result<()> {
             percolation_rate REAL NOT NULL,
             max_duration INTEGER NOT NULL,
             weekly_target REAL NOT NULL,
-            progress REAL NOT NULL
+            progress REAL NOT NULL,
+            last_water REAL NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS cycles (
@@ -243,7 +245,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
 
 pub fn load_sectors(conn: &Connection) -> Result<Vec<SectorInfo>> {
     let mut stmt = conn
-        .prepare("SELECT id, sprinkler_debit, percolation_rate, max_duration, weekly_target, progress FROM sectors")?;
+        .prepare("SELECT id, sprinkler_debit, percolation_rate, max_duration, weekly_target, progress, last_water FROM sectors")?;
     let sectors = stmt
         .query_map([], |row| {
             Ok(SectorInfo {
@@ -253,6 +255,7 @@ pub fn load_sectors(conn: &Connection) -> Result<Vec<SectorInfo>> {
                 max_duration: row.get::<_, i64>(3)? * 60,
                 weekly_target: row.get(4)?,
                 progress: row.get(5)?,
+                last_water: row.get(6)?,
             })
         })?
         .filter_map(Result::ok)
@@ -262,10 +265,10 @@ pub fn load_sectors(conn: &Connection) -> Result<Vec<SectorInfo>> {
 
 pub fn load_cycles(conn: &Connection) -> Result<Vec<Cycle>> {
     let mut stmt = conn.prepare("SELECT id, sector_id, start_time, duration FROM cycles ORDER BY id, sector_id")?;
-    let mut cycles_map: std::collections::HashMap<u32, Vec<WaterSector>> = std::collections::HashMap::new();
+    let mut cycles_map: std::collections::HashMap<i64, Vec<WaterSector>> = std::collections::HashMap::new();
 
     let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)? * 60_i64))
+        Ok((row.get::<_, i64>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)? * 60_i64))
     })?;
 
     for row in rows {
@@ -273,7 +276,10 @@ pub fn load_cycles(conn: &Connection) -> Result<Vec<Cycle>> {
         cycles_map.entry(cycle_id).or_default().push(WaterSector::new(sector_id, start_time, duration));
     }
 
-    Ok(cycles_map.into_iter().map(|(id, instructions)| Cycle { id, instructions }).collect())
+    Ok(cycles_map
+        .into_iter()
+        .map(|(id, instructions)| Cycle { id, daily_plan: DailyPlan(instructions), curr_sector: usize::MAX })
+        .collect())
 }
 
 pub fn load_auto_schedule(conn: &Connection) -> Result<Schedule> {
@@ -298,7 +304,7 @@ pub fn load_auto_schedule(conn: &Connection) -> Result<Schedule> {
 
     for row in rows {
         let (day_of_week, sector_id, start_time, duration) = row?;
-        entries_map.entry(day_of_week).or_default().push(WaterSector::new(sector_id, start_time, duration));
+        entries_map.entry(day_of_week).or_default().0.push(WaterSector::new(sector_id, start_time, duration));
     }
 
     // Convert the HashMap into a Vec<ScheduleEntry>
@@ -319,7 +325,7 @@ pub fn save_auto_schedule(conn: &mut Connection, schedule: &Schedule) -> rusqlit
 
     for entry in &schedule.entries {
         if let ScheduleType::Weekday(day_of_week) = entry.schedule_type {
-            for &sec in &entry.start_times {
+            for &sec in &entry.start_times.0 {
                 tx.execute(
                     "INSERT INTO auto_schedules (day_of_week, sector_id, start_time, duration) VALUES (?1, ?2, ?3, ?4)",
                     rusqlite::params![day_of_week.num_days_from_monday(), sec.id, sec.start, sec.duration],
@@ -335,7 +341,7 @@ pub fn store_plan_in_db(conn: &mut Connection, weekly_plan: &WeeklyPlan) -> rusq
     let tx = conn.transaction()?;
     tx.execute_batch("DELETE FROM wizard_schedule")?; // Clear previous schedule
     for (date, sessions) in weekly_plan {
-        for sec in sessions {
+        for sec in &sessions.0 {
             tx.execute(
                 "INSERT INTO wizard_schedule (date, sector_id, start_time, duration) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params![date, sec.id, sec.start, sec.duration],
@@ -353,7 +359,7 @@ pub fn log_watering_event(conn: &Connection, evt: WateringEvent) -> Result<()> {
         params![
             evt.cycle_id,
             evt.sector.id,
-            display_from_ts(evt.sector.start),
+            ux_ts_to_string(evt.sector.start),
             evt.sector.duration as f64 / 60.,
             evt.water_applied,
             evt.mode.to_string()
@@ -395,7 +401,7 @@ mod test {
 
     use crate::{
         db::load_auto_schedule,
-        watering::{ds::WaterSector, schedule::ScheduleType},
+        watering::{ds::{DailyPlan, WaterSector}, watering_alg::ScheduleType},
     };
 
     #[test]
@@ -439,7 +445,7 @@ mod test {
             .unwrap();
         assert_eq!(
             monday_schedule.start_times,
-            vec![WaterSector::new(101, 21600, 1800), WaterSector::new(102, 28800, 3600)] // Verify start times and durations
+            DailyPlan(vec![WaterSector::new(101, 21600, 1800), WaterSector::new(102, 28800, 3600)]) // Verify start times and durations
         );
 
         // Check Tuesday's schedule
@@ -450,7 +456,7 @@ mod test {
             .unwrap();
         assert_eq!(
             tuesday_schedule.start_times,
-            vec![WaterSector::new(201, 18000, 1200)] // Verify start time and duration
+            DailyPlan(vec![WaterSector::new(201, 18000, 1200)]) // Verify start time and duration
         );
     }
 }

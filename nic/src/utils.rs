@@ -1,22 +1,27 @@
 use std::{collections::HashMap, sync::Arc};
 
-use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc, Weekday};
-use tokio::sync::{broadcast::{self, Receiver, Sender}, Mutex};
+use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Timelike, Utc, Weekday};
+use tokio::sync::{
+    broadcast::{self, Receiver, Sender},
+    Mutex,
+};
 
-use crate::{test::utils::mock_time::MockTimeFormatter, time::TimeProvider, watering::ds::{ControlSignal, SectorInfo}};
+use crate::{
+    test::utils::mock_time::MockTimeFormatter,
+    time::TimeProvider,
+    watering::ds::{CtrlSignal, SectorInfo},
+    MAX_MSGS,
+};
 
-pub fn display_time(utc_time: chrono::DateTime<Utc>) -> String {
-    let local_time = utc_time.with_timezone(&chrono::Local);
-    local_time.format("%Y-%m-%d %H:%M:%S").to_string()
+pub fn utc_datetime_to_string(utc_time: chrono::DateTime<Utc>) -> String {
+    utc_time.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 pub fn parse_datetime_to_utc_timestamp(date_str: &str, format: &str) -> Result<i64, chrono::ParseError> {
-    let naive_datetime = NaiveDateTime::parse_from_str(date_str, format)?;
-    let datetime_utc: DateTime<Utc> = Utc.from_utc_datetime(&naive_datetime);
-    Ok(datetime_utc.timestamp())
+    NaiveDateTime::parse_from_str(date_str, format).map(|naive| Utc.from_utc_datetime(&naive).timestamp())
 }
 
-pub fn display_from_ts(ts: i64) -> String {
+pub fn ux_ts_to_string(ts: i64) -> String {
     DateTime::from_timestamp(ts, 0).unwrap().to_string()
 }
 
@@ -27,23 +32,17 @@ pub fn timezone_offset() -> chrono::Duration {
 }
 
 pub fn sod(ts: i64) -> i64 {
-    ts - (ts % 86400)
+    ts - (ts % 86_400)
 }
 
-pub fn start_log<T: TimeProvider + 'static>(time_provider: Option<Arc<T>>) {
+pub fn start_log(time_provider: Option<Arc<dyn TimeProvider>>) {
+    let subscriber_builder = tracing_subscriber::fmt().with_env_filter("nic=debug").with_target(false); // Hide target module info
+
     if let Some(time_provider) = time_provider {
         let time_formatter = MockTimeFormatter { time_provider };
-
-        tracing_subscriber::fmt()
-            .with_timer(time_formatter)
-            .with_env_filter("nic=debug")
-            .with_target(false) // Hide target module info
-            .init();
+        subscriber_builder.with_timer(time_formatter).init();
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter("nic=debug")
-            .with_target(false) // Hide target module info
-            .init();
+        subscriber_builder.init();
     }
 }
 
@@ -52,9 +51,14 @@ pub fn get_week_day_from_ts(time: i64) -> Weekday {
     datetime.weekday()
 }
 
-pub fn init_channels()->(Arc<Sender<ControlSignal>>, Arc<Mutex<Receiver<ControlSignal>>>){
-    let (tx, rx) = broadcast::channel::<ControlSignal>(100);
-    (Arc::new(tx),Arc::new(Mutex::new(rx)))
+pub fn get_hour_from_ts(time: i64) -> u32 {
+    let datetime = DateTime::<Utc>::from_timestamp(time, 0).unwrap();
+    datetime.hour()
+}
+
+pub fn init_channels() -> (Arc<Sender<CtrlSignal>>, Arc<Mutex<Receiver<CtrlSignal>>>) {
+    let (tx, rx) = broadcast::channel::<CtrlSignal>(MAX_MSGS);
+    (Arc::new(tx), Arc::new(Mutex::new(rx)))
 }
 
 /// Assumes that whevever the machine stops, nect start will be with 0 progress.<br>
@@ -62,17 +66,15 @@ pub fn init_channels()->(Arc<Sender<ControlSignal>>, Arc<Mutex<Receiver<ControlS
 pub fn load_sectors_into_hashmap(sectors: Vec<SectorInfo>) -> HashMap<u32, SectorInfo> {
     // TODO: maybe we can start with a parameter giving that indication and move from there to make the thing smarter.
     // or just get some last rec from db and use that
-    let sectors = sectors
-        .iter()
+    sectors
+        .into_iter()
         .map(|sector| {
             let mut sec = sector.clone();
             sec.progress = 0.;
             (sector.id, sec)
         })
-        .collect();
-    sectors
+        .collect()
 }
-
 
 #[cfg(test)]
 mod test {

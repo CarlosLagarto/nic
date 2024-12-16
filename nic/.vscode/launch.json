@@ -163,7 +163,7 @@
                 "args": [
                     "test",
                     "--no-run",
-                    "--no-capture",
+                    "no-capture",
                     "--test=watering",
                     "--package=nic"
                 ],

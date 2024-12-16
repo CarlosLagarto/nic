@@ -1,107 +1,63 @@
-use std::sync::Arc;
-
 use nic::{
     test::utils::{mock_db::MockDatabase, set_ws0},
     utils::sod,
     watering::{
-        ds::{Cycle, EnvironmentalSignal, WaterSector, WateringState},
-        modes::ModeIdx,
+        ds::{CtrlSignal, DailyPlan, WeatherSignal, WaterSector},
+        modes::Mode,
     },
 };
+use std::sync::Arc;
 
 #[test]
 fn signal_handling() {
     let ref_time = sod(chrono::Utc::now().timestamp());
     let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(ref_time, Some(ModeIdx::Wizard), mock_db).unwrap();
+    let mut ws = set_ws0(ref_time, Some(Mode::Wizard), mock_db).unwrap();
 
-    ws.water_state.start_cycle(Cycle { id: 1, instructions: vec![WaterSector::new(1, ref_time, 30 * 3600)] });
+    let start_time = sod(ref_time) + (22 * 3600); //start at 22:00 UTC
+    let daily_plan = DailyPlan(vec![
+        WaterSector::new(1, start_time, 30 * 60), // Sector 1, , 30 mins duration
+    ]);
+    ws.sm.mode_wizard.daily_plan = vec![daily_plan];
+    ws.sm.trans_watering(start_time);
+    assert!(ws.sm.state.is_watering());
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::RainStart), start_time + 2);
 
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::RainStart);
+    assert!(ws.sm.state.is_paused());
 
-    assert_eq!(ws.water_state.state, WateringState::Idle);
-
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::RainStop);
-
-    assert!(ws.water_state.cycle.is_some());
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::RainStop), start_time + 4);
+    assert!(ws.sm.state.is_watering());
 }
 
 #[test]
 fn weather_signal_handling_all_states() {
     let ref_time = sod(chrono::Utc::now().timestamp());
     let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(ref_time, Some(ModeIdx::Wizard), mock_db).unwrap();
+    let mut ws = set_ws0(ref_time, Some(Mode::Wizard), mock_db).unwrap();
 
-    let duration = 30 * 3600;
-    let sec = WaterSector::new(1, ref_time, duration);
-    ws.water_state.start_cycle(Cycle { id: 1, instructions: vec![sec] });
-    ws.water_state.state = WateringState::Activating(sec);
+    let duration = 30 * 60;
+    let start_time = ref_time + 22 * 3600;
+    let sec = WaterSector::new(1, start_time, duration);
+    let daily_plan = DailyPlan(vec![sec]);
+    ws.sm.mode_wizard.daily_plan = vec![daily_plan];
 
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::RainStart);
-    assert_eq!(ws.water_state.state, WateringState::Idle); // Paused due to rain
-    assert!(ws.water_state.mode_wizard.paused_state.is_some());
+    ws.sm.trans_watering(start_time);
 
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::RainStop);
-    assert!(ws.water_state.mode_wizard.paused_state.is_none()); // Paused state cleared
-    assert!(ws.water_state.cycle.is_some()); // Cycle restored
-    assert_eq!(ws.water_state.state, WateringState::Activating(sec)); // Resume properly
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::RainStart), start_time + 2);
+    assert!(ws.sm.state.is_paused());
 
-    ws.water_state.state = WateringState::Watering(sec); // Set state to watering
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::HighWind);
-    assert_eq!(ws.water_state.state, WateringState::Idle); // Paused due to high wind
-    assert!(ws.water_state.mode_wizard.paused_state.is_some());
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::RainStop), start_time + 4);
+    assert!(ws.sm.state.is_watering());
 
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::LowWind);
-    assert!(ws.water_state.mode_wizard.paused_state.is_none());
-    assert!(ws.water_state.cycle.is_some());
-    assert_eq!(ws.water_state.state, WateringState::Watering(sec)); // Resume properly
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::HighWind), start_time + 6);
+    assert!(ws.sm.state.is_paused());
 
-    ws.water_state.state = WateringState::Activating(sec);
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::RainStart);
-    assert_eq!(ws.water_state.state, WateringState::Idle); // Paused from activating state
-    assert!(ws.water_state.mode_wizard.paused_state.is_some());
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::LowWind), start_time + 8);
+    assert!(ws.sm.state.is_watering());
 
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::RainStop);
-    assert!(ws.water_state.mode_wizard.paused_state.is_none());
-    assert!(ws.water_state.cycle.is_some());
-    assert_eq!(ws.water_state.state, WateringState::Activating(sec)); // Resume properly
-}
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::RainStart), start_time + 10);
+    assert!(ws.sm.state.is_paused());
 
-#[test]
-fn signal_handling_high_wind_and_low_wind() {
-    let ref_time = sod(chrono::Utc::now().timestamp());
-    let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(ref_time, Some(ModeIdx::Wizard), mock_db).unwrap();
-
-    let duration = 30 * 3600;
-    let sec = WaterSector::new(1, ref_time, duration);
-    ws.water_state.start_cycle(Cycle { id: 1, instructions: vec![sec] });
-    ws.water_state.state = WateringState::Watering(sec);
-
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::HighWind);
-    assert_eq!(ws.water_state.state, WateringState::Idle); // Irrigation paused
-    assert!(ws.water_state.mode_wizard.paused_state.is_some());
-
-    ws.water_state.handle_environmental_signal(EnvironmentalSignal::LowWind);
-    assert!(ws.water_state.cycle.is_some());
-    assert_eq!(ws.water_state.state, WateringState::Watering(sec)); // Resumes watering state
-}
-
-#[test]
-fn signal_handling_high_wind() {
-    let ref_time = sod(chrono::Utc::now().timestamp());
-    let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(ref_time, Some(ModeIdx::Wizard), mock_db).unwrap();
-    let sm = &mut ws.water_state;
-
-    let duration = 30 * 3600;
-    let sec = WaterSector::new(1, ref_time, duration);
-    sm.start_cycle(Cycle { id: 1, instructions: vec![sec] });
-    sm.state = WateringState::Watering(sec);
-
-    sm.handle_environmental_signal(EnvironmentalSignal::HighWind);
-
-    assert_eq!(sm.state, WateringState::Idle); // Paused from watering state
-    assert!(sm.mode_wizard.paused_state.is_some());
-    assert!(sm.cycle.is_none());
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::RainStop), start_time + 12);
+    assert!(ws.sm.state.is_watering());
 }

@@ -1,15 +1,16 @@
 use async_trait::async_trait;
-use std::{any::Any, sync::Arc, time::Duration};
-
-use crate::test::utils::mock_time::MockTimeProvider;
+use std::{any::Any, fmt::Debug, time::Duration};
 
 #[async_trait]
-pub trait TimeProvider: Send + Sync {
+pub trait TimeProvider: Send + Sync + Debug {
     fn now(&self) -> i64; // Returns the current time as a Unix UTC timestamp
     fn as_any(&self) -> &dyn Any;
     async fn sleep(&self, duration: Duration);
+    async fn advance_time(&self, seconds: i64);
+    fn set(&self, new_time: i64);
 }
 
+#[derive(Debug)]
 pub struct RealTimeProvider;
 
 #[async_trait]
@@ -26,12 +27,9 @@ impl TimeProvider for RealTimeProvider {
         tokio::time::sleep(duration).await;
     }
 
-}
-
-pub async fn advance_time<T: TimeProvider>(time_provider: &Arc<T>) {
-    if let Some(mock_time) = time_provider.as_any().downcast_ref::<MockTimeProvider>() {
-        mock_time.advance_time(1);
-    } else {
-        time_provider.sleep(Duration::from_secs(1)).await;
+    async fn advance_time(&self, _seconds: i64) {
+        self.sleep(Duration::from_secs(1)).await;
     }
+
+    fn set(&self, _new_time: i64) {}
 }

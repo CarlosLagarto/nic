@@ -1,4 +1,4 @@
-use nic::watering::ds::{ControlSignal, EnvironmentalSignal};
+use nic::watering::ds::{CtrlSignal, WeatherSignal};
 use tokio::sync::broadcast::{self};
 
 #[tokio::test]
@@ -8,7 +8,7 @@ async fn test_rapid_signals() {
     // Simulate rapid signals
     tokio::spawn(async move {
         for _ in 0..100 {
-            tx.send(ControlSignal::Environmental(EnvironmentalSignal::RainStart))
+            tx.send(CtrlSignal::Weather(WeatherSignal::RainStart))
                 .unwrap();
         }
     });
@@ -16,7 +16,7 @@ async fn test_rapid_signals() {
     let mut received_count = 0;
     while let Ok(signal) = rx.recv().await {
         match signal {
-            ControlSignal::Environmental(EnvironmentalSignal::RainStart) => {
+            CtrlSignal::Weather(WeatherSignal::RainStart) => {
                 received_count += 1;
             }
             _ => {}

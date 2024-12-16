@@ -1,4 +1,4 @@
-use super::modes::ModeIdx;
+use super::modes::Mode;
 use crate::{
     api::{CycleResponse, WateringStateResponse},
     db::DatabaseTrait,
@@ -12,10 +12,26 @@ use tokio::sync::{
     Mutex,
 };
 
-pub type DailyPlan = Vec<WaterSector>; // A day's plan: (sector_id , start time,  duration)
 pub type WeeklyPlan = Vec<(i64, DailyPlan)>; // A week's plan: date -> daily plan
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct DailyPlan(pub Vec<WaterSector>); // A day's plan: (sector_id , start time,  duration)
+
+impl DailyPlan {
+    pub fn new() -> Self {
+        Self(vec![])
+    }
+
+    pub fn is_watering_time(&self, current_time: i64) -> bool {
+        self.0.first().map_or(false, |first_sector| first_sector.start <= current_time)
+    }
+
+    pub fn get_cycle(&self, current_time: i64) -> Option<Cycle> {
+        self.is_watering_time(current_time).then(|| Cycle::build(self.clone()))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct SectorInfo {
     pub id: u32,
     /// cm /hour
@@ -28,13 +44,16 @@ pub struct SectorInfo {
     pub weekly_target: f64, // Weekly water target (cm)
     /// current progress
     pub progress: f64,
+    /// last watered
+    pub last_water: i64,
 }
 
 impl SectorInfo {
     pub fn build(
         id: u32, weekly_target: f64, sprinkler_debit: f64, max_duration: i64, progress: f64, percolation_rate: f64,
+        last_water: i64,
     ) -> SectorInfo {
-        SectorInfo { id, weekly_target, sprinkler_debit, percolation_rate, max_duration, progress }
+        SectorInfo { id, weekly_target, sprinkler_debit, percolation_rate, max_duration, progress, last_water }
     }
 }
 
@@ -53,45 +72,46 @@ impl WaterSector {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Cycle {
-    pub id: u32,
-    pub instructions: Vec<WaterSector>, // (Sector ID, Duration)
+    pub id: i64,
+    pub daily_plan: DailyPlan,
+    pub curr_sector: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum WateringState {
-    Idle,                      // No active watering
-    Activating(WaterSector),   // Activating a sector (sector id, start time, duration)
-    Watering(WaterSector),     // Actively watering (sector ID, start time, duration)
-    Deactivating(WaterSector), // Deactivating a sector
-}
+impl Cycle {
+    pub fn build(daily_plan: DailyPlan) -> Self {
+        assert!(!daily_plan.0.is_empty());
+        Cycle { id: daily_plan.0[0].start, daily_plan, curr_sector: usize::MAX }
+    }
 
-impl WateringState {
-    pub fn get_current_sector_id(&self) -> Option<u32> {
-        match self {
-            WateringState::Activating(sec) => Some(sec.id),
-            WateringState::Watering(sec) => Some(sec.id),
-            WateringState::Deactivating(sec) => Some(sec.id),
-            _ => None, // Idle or other states that don't involve a specific sector
-        }
+    pub fn get_start(&self) -> Option<i64> {
+        self.daily_plan.0.first().map(|sector| sector.start)
+    }
+
+    pub fn get_start_unchecked(&self) -> i64 {
+        self.daily_plan.0[0].start
+    }
+
+    pub fn next_sector(&mut self) -> Option<WaterSector> {
+        self.curr_sector = self.curr_sector.wrapping_add(1);
+        self.daily_plan.0.get(self.curr_sector).copied()
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum EnvironmentalSignal {
+#[derive(Debug, Clone, PartialEq)]
+pub enum WeatherSignal {
     RainStart,
     RainStop,
     HighWind,
     LowWind,
 }
+
 #[derive(Debug, Clone)]
-pub enum ControlSignal {
-    Environmental(EnvironmentalSignal),
+pub enum CtrlSignal {
+    Weather(WeatherSignal),
     StopMachine,
-    Weather(String),
+    GenWeather(String),
     DevicesState(String),
-    SwitchToAuto,
-    SwitchToManual,
-    SwitchToWizard,
+    ChgMode(Mode),
     GetState,
     GetStateResponse(WateringStateResponse),
     GetCycle,
@@ -106,20 +126,23 @@ pub struct WeatherConditions {
     pub solar_radiation: f64,
 }
 
-pub struct AppState<C: SensorController, D: DatabaseTrait, T: TimeProvider> {
-    pub db: Arc<D>,
-    pub tx: Arc<Sender<ControlSignal>>,
-    pub rx: Arc<Mutex<Receiver<ControlSignal>>>,
-    pub sensors_ctrl: Arc<C>,
-    pub time_provider: Arc<T>,
+pub struct AppState {
+    pub db: Arc<dyn DatabaseTrait>,
+    pub sm_tx: Arc<Sender<CtrlSignal>>,
+    pub web_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
+    pub web_tx: Arc<Sender<CtrlSignal>>,
+    pub sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
+    pub sensors_ctrl: Arc<dyn SensorController>,
+    pub time_provider: Arc<dyn TimeProvider>,
 }
 
-impl<C: SensorController + 'static, D: DatabaseTrait + 'static, T: TimeProvider + 'static> AppState<C, D, T> {
+impl AppState {
     pub async fn new(
-        db: Arc<D>, sensors_ctrl: Arc<C>, time_provider: Arc<T>, tx: Arc<Sender<ControlSignal>>,
-        rx: Arc<Mutex<Receiver<ControlSignal>>>,
+        db: Arc<dyn DatabaseTrait>, sensors_ctrl: Arc<dyn SensorController>, time_provider: Arc<dyn TimeProvider>,
+        sm_tx: Arc<Sender<CtrlSignal>>, sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>, web_tx: Arc<Sender<CtrlSignal>>,
+        web_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
     ) -> Result<Arc<Self>, AppError> {
-        Ok(Arc::new(AppState { db, tx, rx, sensors_ctrl, time_provider }))
+        Ok(Arc::new(AppState { db, sm_tx, sm_rx, web_tx, web_rx, sensors_ctrl, time_provider }))
     }
 }
 
@@ -128,11 +151,11 @@ pub struct WateringEvent {
     pub cycle_id: Option<u32>,
     pub sector: WaterSector,
     pub water_applied: f64,
-    pub mode: ModeIdx,
+    pub mode: Mode,
 }
 
 impl WateringEvent {
-    pub fn new(cycle_id: Option<u32>, sector: WaterSector, water_applied: f64, mode: ModeIdx) -> Self {
+    pub fn new(cycle_id: Option<u32>, sector: WaterSector, water_applied: f64, mode: Mode) -> Self {
         Self { cycle_id, sector, water_applied, mode }
     }
 }

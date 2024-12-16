@@ -3,8 +3,8 @@ use crate::error::AppError;
 use crate::sensors::interface::SensorController;
 use crate::time::TimeProvider;
 use crate::utils::{init_channels, sod};
-use crate::watering::ds::{AppState, Cycle, SectorInfo, WaterSector, WateringEvent, WeatherConditions};
-use crate::watering::schedule::{Schedule, ScheduleEntry, ScheduleType};
+use crate::watering::ds::{AppState, Cycle, DailyPlan, SectorInfo, WaterSector, WateringEvent, WeatherConditions};
+use crate::watering::watering_alg::{Schedule, ScheduleEntry, ScheduleType};
 use async_trait::async_trait;
 use chrono::Weekday;
 use rusqlite::Result;
@@ -12,14 +12,15 @@ use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
-pub fn new_with_mock<C: SensorController + 'static, D: DatabaseTrait + 'static, T: TimeProvider + 'static>(
-    db: Arc<D>, sensors_ctrl: Arc<C>, time_provider: Arc<T>,
-) -> Result<Arc<AppState<C, D, T>>, AppError> {
-    let (tx, rx) = init_channels();
-    Ok(Arc::new(AppState { db, tx, rx, sensors_ctrl, time_provider }))
+pub fn new_with_mock(
+    db: Arc<dyn DatabaseTrait>, sensors_ctrl: Arc<dyn SensorController>, time_provider: Arc<dyn TimeProvider>,
+) -> Result<Arc<AppState>, AppError> {
+    let (sm_tx, sm_rx) = init_channels();
+    let (web_tx, web_rx) = init_channels();
+    Ok(Arc::new(AppState { db, sm_tx, sm_rx, web_tx, web_rx, sensors_ctrl, time_provider }))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MockDatabase {
     pub sender: Sender<DatabaseCommand>,
     pub data: Arc<Mutex<HashMap<String, String>>>, // Simulates database storage
@@ -81,7 +82,7 @@ impl MockDatabase {
                     }
                     DatabaseCommand::LoadAutoSchedule { response, .. } => {
                         println!("Mock load auto schedule");
-                        let entries = mock_auto_schedule();
+                        let entries = mock_schedule();
                         let _ = response.send(Ok(Schedule::new(entries)));
                     }
                 }
@@ -100,6 +101,7 @@ fn mock_sector() -> Vec<SectorInfo> {
         max_duration: 30 * 3600,
         percolation_rate: 0.5,
         progress: 0.,
+        last_water: 0,
     }];
     sectors
 }
@@ -108,14 +110,23 @@ fn mock_weather() -> WeatherConditions {
     WeatherConditions { is_raining: false, wind_speed: 10.0, humidity: 20., solar_radiation: 1., temperature: 15. }
 }
 
-fn mock_auto_schedule() -> Vec<ScheduleEntry> {
+fn mock_schedule() -> Vec<ScheduleEntry> {
     let entries = vec![
         ScheduleEntry {
             schedule_type: ScheduleType::Weekday(Weekday::Mon),
-            start_times: vec![WaterSector::new(1, 6 * 3600, 30 * 60), WaterSector::new(2, 7 * 3600, 20 * 60)],
+            start_times: DailyPlan(vec![
+                WaterSector::new(1, 6 * 3600, 30 * 60),
+                WaterSector::new(2, 7 * 3600, 20 * 60),
+            ]),
         },
-        ScheduleEntry { schedule_type: ScheduleType::Weekday(Weekday::Wed), start_times: vec![WaterSector::new(3, 8 * 3600, 40 * 60)] },
-        ScheduleEntry { schedule_type: ScheduleType::Weekday(Weekday::Fri), start_times: vec![WaterSector::new(4, 9 * 3600, 50 * 60)] },
+        ScheduleEntry {
+            schedule_type: ScheduleType::Weekday(Weekday::Mon),
+            start_times: DailyPlan(vec![WaterSector::new(3, 8 * 3600, 40 * 60)]),
+        },
+        ScheduleEntry {
+            schedule_type: ScheduleType::Weekday(Weekday::Mon),
+            start_times: DailyPlan(vec![WaterSector::new(4, 9 * 3600, 50 * 60)]),
+        },
     ];
     entries
 }
@@ -160,6 +171,6 @@ impl DatabaseTrait for MockDatabase {
     }
 
     fn load_auto_schedule(&self) -> Result<Schedule, rusqlite::Error> {
-        Ok(Schedule::new(mock_auto_schedule()))
+        Ok(Schedule::new(mock_schedule()))
     }
 }

@@ -1,196 +1,122 @@
 use super::{
-    ds::{AppState, ControlSignal, WaterSector, WateringState},
-    modes::ModeIdx,
-    water_state::WaterState,
+    ds::{AppState, CtrlSignal},
+    modes::*,
+    state_machine::*,
 };
 use crate::{
     api::{CycleResponse, WateringStateResponse},
     db::DatabaseTrait,
     error::AppError,
     sensors::interface::SensorController,
-    time::{advance_time, TimeProvider},
-    utils::{display_from_ts, sod},
-    watering::ds::WateringEvent,
+    time::TimeProvider,
+    utils::sod,
 };
 use std::sync::Arc;
 use tokio::sync::{
     broadcast::{Receiver, Sender},
     Mutex,
 };
-use tracing::{info, trace};
+use tracing::info;
 
-#[derive(Debug, Clone)]
-pub struct WateringSystem<C, D, T>
-where
-    C: SensorController,
-    D: DatabaseTrait,
-    T: TimeProvider,
-{
-    pub water_state: WaterState,
-    pub controller: Arc<C>,    // Sensor controller (mockable)
-    pub time_provider: Arc<T>, // Injected time provider
-    pub db: Arc<D>,            // Injected time provider
-    pub tx: Arc<Sender<ControlSignal>>,
-    pub rx: Arc<Mutex<Receiver<ControlSignal>>>,
+#[derive(Debug)]
+pub struct WateringSystem {
+    pub sm: StateMachine,
+    pub controller: Arc<dyn SensorController>, // Sensor controller (mockable)
+    pub time_provider: Arc<dyn TimeProvider>,  // Injected time provider
+    pub db: Arc<dyn DatabaseTrait>,            // Injected db provider
+    pub web_tx: Arc<Sender<CtrlSignal>>,
+    pub sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
 }
 
-impl<C, D, T> WateringSystem<C, D, T>
-where
-    C: SensorController + 'static,
-    D: DatabaseTrait + 'static,
-    T: TimeProvider + 'static,
-{
+impl WateringSystem {
     pub fn new(
-        controller: Arc<C>, db: Arc<D>, time_provider: Arc<T>, starting_mode: Option<ModeIdx>,
-        tx: Arc<Sender<ControlSignal>>, rx: Arc<Mutex<Receiver<ControlSignal>>>,
-    ) -> Result<Self, AppError>
-    where
-        D: DatabaseTrait + 'static,
-    {
+        controller: Arc<dyn SensorController>, db: Arc<dyn DatabaseTrait>, time_provider: Arc<dyn TimeProvider>,
+        starting_mode: Option<Mode>, web_tx: Arc<Sender<CtrlSignal>>, sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
+        current_time: i64,
+    ) -> Result<Self, AppError> {
         let sectors = db.load_sectors()?;
-        let water_state = WaterState::new(starting_mode, sectors);
-        Ok(WateringSystem { water_state, db, controller, time_provider, tx, rx })
+        let state = StateMachine::new(controller.clone(), starting_mode, sectors, current_time, db.clone());
+        Ok(WateringSystem { sm: state, db, controller, time_provider, web_tx, sm_rx })
     }
 
-    async fn handle_control_signals(&mut self) {
-        let signal_res = self.rx.lock().await.try_recv();
-        if let Ok(signal) = signal_res {
+    async fn handle_control_signals(&mut self, current_time: i64) {
+        if let Ok(signal) = self.sm_rx.lock().await.try_recv() {
             match signal {
-                ControlSignal::SwitchToAuto => self.water_state.switch_mode(ModeIdx::Auto),
-                ControlSignal::SwitchToManual => self.water_state.switch_mode(ModeIdx::Manual),
-                ControlSignal::SwitchToWizard => self.water_state.switch_mode(ModeIdx::Wizard),
-                ControlSignal::Environmental(env_signal) => {
-                    if ModeIdx::Wizard == self.water_state.active_mode {
-                        self.water_state.handle_environmental_signal(env_signal);
-                    }
+                CtrlSignal::DevicesState(_x) => {} //TODO
+                CtrlSignal::Weather(_) | CtrlSignal::StopMachine | CtrlSignal::ChgMode(_) => {
+                    self.sm.handle_signal(signal, current_time)
                 }
-                ControlSignal::StopMachine => self.water_state.set_idle(),
-                ControlSignal::Weather(_weather) => {} //TODO:
-                ControlSignal::DevicesState(_state) => {}
-                ControlSignal::GetState => {
-                    let res = self.get_state();
-                    _ = self.tx.send(ControlSignal::GetStateResponse(res));
+                CtrlSignal::GetCycle => {
+                    let resp = self.get_cycle();
+                    let _res = self.web_tx.send(CtrlSignal::GetCycleResponse(resp));
                 }
-                ControlSignal::GetCycle => {
-                    let res = self.get_cycle();
-                    _ = self.tx.send(ControlSignal::GetCycleResponse(res));
+                CtrlSignal::GetState => {
+                    let resp = self.get_state();
+                    let _res = self.web_tx.send(CtrlSignal::GetStateResponse(resp));
                 }
-                //do nothing for the other msgs
-                ControlSignal::GetStateResponse(_) => (),
-                ControlSignal::GetCycleResponse(_) => (),
+                CtrlSignal::GenWeather(_x) => {} //TODO
+                //the next arms are not needed
+                _ => (),
+                // ControlSignal::GetStateResponse(watering_state_response) => ()
+                // ControlSignal::GetCycleResponse(cycle_response) => ()
             }
         }
     }
 
-    pub async fn execute_active_mode(&mut self, current_time: i64) {
-        match self.water_state.active_mode {
-            ModeIdx::Wizard => {
-                trace!("Wizard Mode: Executing dynamic schedule.");
-                self.water_state.execute_wizard(current_time)
-            }
-            ModeIdx::Auto => {
-                let base_time = sod(current_time); // Start of the current day
-                if self.water_state.timeframe.is_within(current_time, base_time) {
-                    trace!("Auto Mode: Executing auto schedule.");
-                    self.water_state.execute_auto(current_time)
-                }
-            }
-            ModeIdx::Manual => {
-                info!("Manual Mode: No automatic scheduling.");
-                self.water_state.execute_manual(current_time)
-            }
-        };
-
-        match self.water_state.state {
-            WateringState::Activating(sec) => {
-                _ = self.controller.activate_sector(sec.id); // TODO
-                self.water_state.state = WateringState::Watering(sec);
-                info!("Activated sector {} at {} for {} seconds.", sec.id, display_from_ts(sec.start), sec.duration);
-            }
-            WateringState::Deactivating(sec) => {
-                _ = self.controller.deactivate_sector(sec.id); // TODO
-                info!("Deactivated sector {}.", sec.id);
-                self.water_state.handle_deactivating(current_time);
-            }
-            WateringState::Watering(sec) => {
-                self.update_active_sector(sec, current_time);
-            }
-            _ => (),
+    fn do_daily_adjustments(&mut self, last_day: &mut i64, now: i64) {
+        let day_start = sod(now);
+        if *last_day == day_start {
+            return; // Skip unnecessary processing if adjustments have already been made for today
         }
-    }
 
-    fn do_daily_adjustments(&mut self, daily_adjustment_done: &mut Option<i64>, now: i64) {
-        // Check if adjustments have already been made for the current day
-        let day_start = sod(now); // Calculate start of the current day
-        if daily_adjustment_done.map_or(true, |last_day| last_day != day_start) {
-            *daily_adjustment_done = Some(day_start);
-            let daily_et = self.db.get_daily_et(day_start).unwrap_or(0.); // Default to 0.0 if no ET data available
-            let daily_rain = self.db.get_lastday_rain(day_start).unwrap_or(0.);
-            self.water_state.do_daily_adjustments(now, daily_et, daily_rain);
+        *last_day = day_start;
 
-            info!("Daily adjustments completed for {:?}", display_from_ts(day_start));
-        }
+        // Use default values directly in a single call to reduce redundant operations
+        let (daily_et, daily_rain) =
+            (self.db.get_daily_et(day_start).unwrap_or(0.0), self.db.get_lastday_rain(day_start).unwrap_or(0.0));
+
+        self.sm.do_daily_adjustments(now, daily_et, daily_rain);
+        info!("Performed daily adjustments: ET = {:.2}, Rain = {:.2}", daily_et, daily_rain);
     }
 
     pub fn get_state(&self) -> WateringStateResponse {
-        let mode = self.water_state.active_mode;
+        let mode = self.sm.current_mode;
 
-        let state = match &self.water_state.state {
-            WateringState::Idle => "Idle".to_string(),
-            WateringState::Activating(sector) => format!("Activating sector {}", sector.id),
-            WateringState::Watering(sec) => {
+        let state = match &self.sm.state {
+            SMState::Idle => "Idle".to_string(),
+            SMState::Watering(sec) => {
                 format!("Watering sector {} for {:.2} minutes", sec.id, (sec.duration as f64 / 60.))
             }
-            WateringState::Deactivating(sec) => format!("Deactivating sector {}", sec.id),
+            SMState::Paused(data) => match *data.state {
+                SMState::Watering(ref sec) => format!("Paused sector {}", sec.id),
+                _ => unreachable!(),
+            },
         };
-
-        let current_cycle = self
-            .water_state
-            .cycle
-            .as_ref()
-            .map(|cycle| format!("Cycle ID: {}, Instructions: {:?}", cycle.id, cycle.instructions));
+        let current_cycle =
+            self.sm.cycle.as_ref().map(|cycle| format!("Cycle ID: {}, Instructions: {:?}", cycle.id, cycle.daily_plan));
 
         WateringStateResponse { error: None, mode: Some(mode.to_string()), state: Some(state), current_cycle }
     }
 
     pub fn get_cycle(&self) -> CycleResponse {
-        if let Some(cycle) = &self.water_state.cycle {
-            let instructions =
-                cycle.instructions.iter().map(|sec| (sec.id, format!("{} minutes", sec.duration))).collect();
-            CycleResponse { error: None, id: Some(cycle.id), instructions: Some(instructions) }
-        } else {
-            CycleResponse { error: None, id: None, instructions: None }
+        CycleResponse {
+            error: None,
+            id: self.sm.cycle.as_ref().map(|cycle| cycle.id),
+            instructions: self.sm.cycle.as_ref().map(|cycle| {
+                cycle.daily_plan.0.iter().map(|sec| (sec.id, format!("{} minutes", sec.duration))).collect()
+            }),
         }
-    }
-
-    pub fn update_active_sector(&mut self, sec: WaterSector, current_time: i64) {
-        let elapsed_secs = (current_time - sec.start) as f64;
-
-        let sector = self.water_state.sectors.get_mut(&sec.id).unwrap();
-        if elapsed_secs >= sec.duration as f64 {
-            info!("Completed watering for sector {}", sector.id);
-            let water_applied = (elapsed_secs / 3600.0) * sector.sprinkler_debit; // Final water applied
-
-            _ = self.db.log_watering_event(WateringEvent::new(None, sec, water_applied, self.water_state.active_mode));
-        }
-        let incremental_progress = (1.0 / 3600.0) * sector.sprinkler_debit;
-
-        sector.progress += incremental_progress;
-        trace!("Sector {} watering progress: {:.2} cm", sector.id, sector.progress);
     }
 }
 
-pub async fn run_watering_system<C, D, T>(
-    app_state: Arc<AppState<C, D, T>>,
-    starting_mode: Option<ModeIdx>,
-    end_time: Option<i64>,                    // Optional parameter for simulation
-    ws: Option<&mut WateringSystem<C, D, T>>, // Optional parameter for simulation
-) -> Result<(), AppError>
-where
-    C: SensorController + 'static,
-    D: DatabaseTrait + 'static,
-    T: TimeProvider + 'static,
-{
+pub async fn run_watering_system(
+    app_state: Arc<AppState>,
+    starting_mode: Option<Mode>,
+    stop_signal: tokio::sync::watch::Receiver<bool>, // Add stop signal
+    end_time: Option<i64>,                           // Optional parameter for simulation
+    ws: Option<&mut WateringSystem>,                 // Optional parameter for simulation
+) -> Result<(), AppError> {
+    let mut now = app_state.time_provider.now();
     let ws = if let Some(ws1) = ws {
         ws1
     } else {
@@ -199,39 +125,26 @@ where
             app_state.db.clone(),
             app_state.time_provider.clone(),
             starting_mode,
-            app_state.tx.clone(),
-            app_state.rx.clone(),
+            app_state.web_tx.clone(),
+            app_state.sm_rx.clone(),
+            now,
         )?
     };
 
-    let mut daily_adjustment_done: Option<i64> = None;
-    let mut now;
-
-    loop {
+    let mut last_day = sod(now);
+    let stop_signal = stop_signal; // Clone the receiver for use in the loop
+    while end_time.map_or(true, |end| now < end) && !*stop_signal.borrow(){
         now = ws.time_provider.now();
 
-        // Exit the loop if `end_time` is specified and reached
-        if let Some(end_time) = end_time {
-            if now >= end_time {
-                info!("Ending watering system simulation at {:?}", now);
-                break;
-            }
-        }
-        // Handle daily adjustments at midnight
-        if now >= sod(now) && daily_adjustment_done.map_or(true, |last_day| last_day != sod(now)) {
-            daily_adjustment_done = Some(sod(now));
-            ws.do_daily_adjustments(&mut daily_adjustment_done, now);
-            info!("Performed daily adjustments.");
-        }
+        // in the fn we validate if it is a new day and a new week
+        ws.do_daily_adjustments(&mut last_day, now);
 
-        ws.handle_control_signals().await;
+        ws.handle_control_signals(now).await;
 
-        ws.execute_active_mode(now).await;
+        ws.sm.update(now);
 
-        advance_time(&ws.time_provider).await;
+        ws.time_provider.advance_time(1).await;
     }
+    info!("Ending watering system.");
     Ok(())
 }
-
-#[cfg(test)]
-mod test {}

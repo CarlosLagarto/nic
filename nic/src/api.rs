@@ -1,44 +1,77 @@
 use crate::{
-    db::DatabaseTrait,
-    sensors::interface::SensorController,
-    time::TimeProvider,
-    watering::ds::{AppState, ControlSignal},
+    watering::{
+        ds::{AppState, CtrlSignal},
+        modes::Mode,
+    },
+    weather::api::{list_devices, query_weather},
 };
+use axum::extract::Path;
+use axum::routing::post;
 use axum::{extract::State, Json};
+use axum::{routing::get, Router};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{error::Error, net::SocketAddr};
+use std::{str::FromStr, sync::Arc};
+use tokio::{signal, sync::watch};
+use tracing::info;
 
-pub async fn switch_to_auto<C, D, T>(app_state: State<Arc<AppState<C, D, T>>>) -> Json<&'static str>
-where
-    C: SensorController + 'static,
-    D: DatabaseTrait + 'static,
-    T: TimeProvider + 'static,
-{
-    _ = app_state.tx.send(ControlSignal::SwitchToAuto);
-    Json("Switched to Auto Mode")
+pub async fn run_web_server(
+    app_state: Arc<AppState>, ip_addr: SocketAddr, stop_signal: watch::Receiver<bool>,
+) -> Result<(), Box<dyn Error>> {
+    let app = Router::new()
+        .route("/devices", get(list_devices))
+        .route("/weather", get(query_weather))
+        .route("/state", get(get_state))
+        .route("/cycle", get(get_cycle))
+        .route("/switch/:mode", post(switch_mode))
+        .route("/command", get(send_command)) // Example: command=stop or command=auto
+        .with_state(app_state);
+
+    info!("Starting HTTP server on http://{}", ip_addr);
+    let listener = tokio::net::TcpListener::bind(ip_addr).await.unwrap();
+    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal(stop_signal)).await?;
+    Ok(())
 }
 
-pub async fn switch_to_manual<C, D, T>(app_state: State<Arc<AppState<C, D, T>>>) -> Json<&'static str>
-where
-    C: SensorController + 'static,
-    D: DatabaseTrait + 'static,
-    T: TimeProvider + 'static,
-{
-    _ = app_state.tx.send(ControlSignal::SwitchToManual); // TODO
-    Json("Switched to Manual Mode")
+pub async fn switch_mode(Path(mode): Path<String>, app_state: State<Arc<AppState>>) -> Json<String> {
+    match Mode::from_str(&mode) {
+        Ok(valid_mode) => {
+            app_state.sm_tx.send(CtrlSignal::ChgMode(valid_mode)).unwrap();
+            Json(format!("Switched to {} mode", valid_mode))
+        }
+        Err(_) => Json("error: Invalid mode".to_owned()),
+    }
 }
 
-pub async fn switch_to_wizard<C, D, T>(app_state: State<Arc<AppState<C, D, T>>>) -> Json<&'static str>
-where
-    C: SensorController + 'static,
-    D: DatabaseTrait + 'static,
-    T: TimeProvider + 'static,
-{
-    _ = app_state.tx.send(ControlSignal::SwitchToWizard); // TODO
-    Json("Switched to Wizard Mode")
+async fn shutdown_signal(stop_signal: watch::Receiver<bool>) {
+    let ctrl_c = async {
+        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    let stop_signal_task = async {
+        while !*stop_signal.borrow() {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+        _ = stop_signal_task=>{}
+    }
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct WateringStateResponse {
     pub error: Option<String>,
     pub mode: Option<String>,
@@ -52,19 +85,13 @@ impl WateringStateResponse {
     }
 }
 
-pub async fn get_state<C, D, T>(State(app_state): State<Arc<AppState<C, D, T>>>) -> Json<WateringStateResponse>
-where
-    C: SensorController,
-    D: DatabaseTrait,
-    T: TimeProvider,
-{
-    _ = app_state.tx.send(ControlSignal::GetState); // TODO
+pub async fn get_state(State(app_state): State<Arc<AppState>>) -> Json<WateringStateResponse> {
+    _ = app_state.sm_tx.send(CtrlSignal::GetState); // TODO
     loop {
-        match app_state.rx.lock().await.recv().await {
+        match app_state.web_rx.lock().await.recv().await {
             Ok(resp) => {
-                if let ControlSignal::GetStateResponse(resp) = resp{
+                if let CtrlSignal::GetStateResponse(resp) = resp {
                     return Json(resp);
-                    // break;
                 }
             }
             Err(_e) => return Json(WateringStateResponse::new_error()), // TODO , return error messae
@@ -72,12 +99,7 @@ where
     }
 }
 
-pub async fn send_command<C, D, T>(State(_app_state): State<Arc<AppState<C, D, T>>>) -> String
-where
-    C: SensorController,
-    D: DatabaseTrait,
-    T: TimeProvider,
-{
+pub async fn send_command(State(_app_state): State<Arc<AppState>>) -> String {
     // Parse command and modify system state
     // TODO:
     "Command received".to_string()
@@ -86,7 +108,7 @@ where
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CycleResponse {
     pub error: Option<String>,
-    pub id: Option<u32>,
+    pub id: Option<i64>,
     pub instructions: Option<Vec<(u32, String)>>, // Instruction details: sector and duration
 }
 
@@ -95,19 +117,13 @@ impl CycleResponse {
         Self { error: Some("Error".to_owned()), id: None, instructions: None }
     }
 }
-pub async fn get_cycle<C, D, T>(State(app_state): State<Arc<AppState<C, D, T>>>) -> Json<CycleResponse>
-where
-    C: SensorController,
-    D: DatabaseTrait,
-    T: TimeProvider,
-{
-    _ = app_state.tx.send(ControlSignal::GetCycle); //TODO
+pub async fn get_cycle(State(app_state): State<Arc<AppState>>) -> Json<CycleResponse> {
+    _ = app_state.sm_tx.send(CtrlSignal::GetCycle); //TODO
     loop {
-        match app_state.rx.lock().await.recv().await {
+        match app_state.web_rx.lock().await.recv().await {
             Ok(resp) => {
-                if let ControlSignal::GetCycleResponse(resp) = resp {
+                if let CtrlSignal::GetCycleResponse(resp) = resp {
                     return Json(resp);
-                    // break;
                 }
             }
             Err(_e) => return Json(CycleResponse::new_error()), // TODO , return error messae

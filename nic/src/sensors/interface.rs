@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use reqwest;
 use reqwest::blocking;
 use tracing::debug;
@@ -9,11 +11,12 @@ pub enum ControlMessage {
     Deactivate(u32),
 }
 
-pub trait SensorController: Send + Sync {
+pub trait SensorController: Send + Sync + Debug{
     fn activate_sector(&self, sector: u32) -> Result<(), AppError>;
     fn deactivate_sector(&self, sector: u32) -> Result<(), AppError>;
 }
 
+#[derive(Debug)]
 pub struct RealSensorController;
 
 impl SensorController for RealSensorController {
