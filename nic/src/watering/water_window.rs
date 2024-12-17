@@ -42,12 +42,13 @@ impl WaterWin {
 
     pub fn is_within_or_future(&self, time: i64) -> bool {
         if time >= self.day_start_time && time <= self.day_end_time {
-            true
-        } else if time > self.day_end_time {
-            (time - self.day_start_time) % 86_400 < (self.day_end_time - self.day_start_time + 1)
-        } else {
-            false
+            return true;
         }
+        if time > self.day_end_time {
+            return (time - self.day_start_time) % 86_400 < (self.day_end_time - self.day_start_time + 1);
+        }
+
+        false
     }
 }
 

@@ -19,7 +19,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     start_log(None);
 
     info!("Starting application...");
-    // debug!("test");
 
     let db = Arc::new(Database::new(&cfg.database.name)?);
 

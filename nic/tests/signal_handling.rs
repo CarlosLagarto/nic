@@ -48,10 +48,10 @@ fn weather_signal_handling_all_states() {
     ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::RainStop), start_time + 4);
     assert!(ws.sm.state.is_watering());
 
-    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::HighWind), start_time + 6);
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::WindHigh), start_time + 6);
     assert!(ws.sm.state.is_paused());
 
-    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::LowWind), start_time + 8);
+    ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::WindLow), start_time + 8);
     assert!(ws.sm.state.is_watering());
 
     ws.sm.handle_signal(CtrlSignal::Weather(WeatherSignal::RainStart), start_time + 10);

@@ -5,10 +5,14 @@ name = "watering_system.db"
 address = "0.0.0.0:8080"
 
 [mqtt]
-address = ""
+address = "localhost:1883"
+client_id = "nic"
 
 [weather_station]
 address = ""
+rain_threshold = 1.0
+wind_threshold = 15.0
+geo_pos = { lat = 40.440725, long = -8.682944, elev = 51.0 }
 
 [watering]
 sector_transation_secs = 20

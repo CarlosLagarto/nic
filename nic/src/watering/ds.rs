@@ -6,7 +6,7 @@ use crate::{
     sensors::interface::SensorController,
     time::TimeProvider,
 };
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 use tokio::sync::{
     broadcast::{Receiver, Sender},
     Mutex,
@@ -106,8 +106,20 @@ impl Cycle {
 pub enum WeatherSignal {
     RainStart,
     RainStop,
-    HighWind,
-    LowWind,
+    WindHigh,
+    WindLow,
+}
+
+impl Display for WeatherSignal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mode = match *self {
+            WeatherSignal::WindHigh => "wind_high",
+            WeatherSignal::WindLow => "wind_low",
+            WeatherSignal::RainStart => "rain_start",
+            WeatherSignal::RainStop => "rain_stop",
+        };
+        f.write_str(mode)
+    }
 }
 
 #[derive(Debug, Clone)]

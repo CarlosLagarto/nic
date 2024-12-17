@@ -95,7 +95,7 @@ async fn test_full_web_server() {
     let ip_addr = str_ip_addr.parse().unwrap();
     let server_task = tokio::spawn(async move {
         if let Err(e) = run_web_server(app_state_clone, ip_addr, rx_clone).await {
-            error!("Web server error: {}", e);
+            error!(error=?e, "Web server error.");
         }
     });
 

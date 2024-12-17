@@ -21,12 +21,12 @@ pub fn set_sensor_controller0() -> Arc<MockSensorController> {
     // .with(mockall::predicate::eq(1))
     // Relaxed to allow any sector ID
     mock_controller.expect_activate_sector().with(mockall::predicate::always()).times(0..).returning(|sector| {
-        trace!("Mocked activation-0 for sector {}", sector);
+        trace!(sector_id = sector, "Mocked activation-0.");
         Ok(())
     });
     // Allow multiple deactivations
     mock_controller.expect_deactivate_sector().with(mockall::predicate::always()).times(0..).returning(|sector| {
-        trace!("Mocked deactivation-0 for sector {}", sector);
+        trace!(sector_id = sector, "Mocked deactivation-0.");
         Ok(())
     });
 
@@ -37,12 +37,12 @@ pub fn set_sensor_controller1() -> Arc<MockSensorController> {
     let mut mock_controller = MockSensorController::new();
 
     mock_controller.expect_activate_sector().with(mockall::predicate::always()).times(1..).returning(|sector| {
-        trace!("Mocked activation-1 for sector {}", sector);
+        trace!(sector_id = sector, "Mocked activation-1.");
         Ok(())
     });
     // Allow at least one deactivation
     mock_controller.expect_deactivate_sector().with(mockall::predicate::always()).times(1..).returning(move |sector| {
-        trace!("Mocked deactivation-1 for sector {}", sector);
+        trace!(sector_id = sector, "Mocked deactivation-1.");
         Ok(())
     });
     Arc::new(mock_controller)

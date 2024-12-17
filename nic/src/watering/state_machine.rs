@@ -36,9 +36,9 @@ impl SMState {
         matches!(self, SMState::Watering(_))
     }
 
-    pub fn is_idle(&self) -> bool {
-        *self == SMState::Idle
-    }
+    // pub fn is_idle(&self) -> bool {
+    //     *self == SMState::Idle
+    // }
 
     pub fn is_paused(&self) -> bool {
         matches!(self, SMState::Paused(_))
@@ -98,7 +98,7 @@ impl StateMachine {
         self.timeframe.roll_window(current_time);
         match self.state {
             SMState::Watering(sec) => {
-                trace!("Watering sector {}", sec.id);
+                trace!(sector_id = sec.id, "Watering sector.");
                 if current_time >= sec.start + sec.duration {
                     self.deactivate_sector(current_time, sec);
                     if let Some(next_sec) = self.cycle.as_mut().and_then(|cycle| cycle.next_sector()) {
@@ -111,9 +111,7 @@ impl StateMachine {
                     self.update_active_sector(sec, current_time);
                 }
             }
-            SMState::Idle if matches!(self.current_mode, Mode::Wizard | Mode::Auto) => {
-                self.trans_watering(current_time)
-            }
+            SMState::Idle if self.is_auto_or_wizard() => self.trans_watering(current_time),
             _ => trace!("Update ignored in current state."),
         }
     }
@@ -128,9 +126,9 @@ impl StateMachine {
             trace!("{} mode schedule {:?}", self.current_mode, daily_plan);
             if let Some(mut cycle) = daily_plan.first().unwrap().get_cycle(current_time) {
                 info!(
-                    "{} Mode: Starting watering cycle at {}.",
-                    self.current_mode,
-                    ux_ts_to_string(cycle.get_start_unchecked())
+                    mode = ?self.current_mode,
+                    cycle_start = ux_ts_to_string(cycle.get_start_unchecked()),
+                    "Starting watering cycle.",
                 );
 
                 if let Some(sec) = cycle.next_sector() {
@@ -147,14 +145,14 @@ impl StateMachine {
         if let Err(e) = self.controller.activate_sector(sec.id) {
             error!("Failed to activate sector {}: {}", sec.id, e);
         } else {
-            info!("Moving to sector: {}", sec.id);
+            info!(sector = sec.id, "Moving to sector.");
         }
     }
 
     fn deactivate_sector(&mut self, current_time: i64, sec: WaterSector) {
         self.sectors.get_mut(&sec.id).unwrap().last_water = current_time;
         if let Err(e) = self.controller.deactivate_sector(sec.id) {
-            println!("Failed to deactivate sector {}: {}", sec.id, e);
+            error!(sector_id=sec.id, error=?e,"Failed to deactivate sector");
         };
     }
 
@@ -164,7 +162,7 @@ impl StateMachine {
         let sector = self.sectors.get_mut(&sec.id).unwrap();
         let sprinkler_debit_per_sec = SECS_TO_HOUR_CONV * sector.sprinkler_debit;
         if elapsed_secs >= sec.duration as f64 {
-            info!("Completed watering for sector {}", sector.id);
+            info!(sector = sector.id, "Completed watering for sector.");
             let water_applied = elapsed_secs * sprinkler_debit_per_sec; // Final water applied
 
             _ = self.db.log_watering_event(WateringEvent::new(None, sec, water_applied, self.current_mode));
@@ -176,14 +174,14 @@ impl StateMachine {
 
     pub fn trans_pause(&mut self, signal: WeatherSignal, current_time: i64) {
         if self.current_mode != Mode::Wizard {
-            trace!("Pause not applicable in the current mode: {:?}", self.current_mode);
+            trace!(mode=?self.current_mode,"Pause not applicable.");
             return;
         }
         match &mut self.state {
             SMState::Watering(sec) => {
                 let sec_clone = *sec;
                 self.deactivate_sector(current_time, sec_clone);
-                info!("Sector {} deactivated due to pause signal {:?}", sec_clone.id, signal);
+                info!(sector = sec_clone.id, signal = ?signal, "Sector deactivated due to pause signal");
                 let paused_data = PausedData { state: self.state.boxed(), signals: vec![signal] };
                 self.state = SMState::Paused(paused_data);
             }
@@ -212,7 +210,7 @@ impl StateMachine {
     }
 
     pub fn trans_resume(&mut self, env_signal: WeatherSignal, current_time: i64) {
-        if !matches!(env_signal, WeatherSignal::LowWind | WeatherSignal::RainStop) {
+        if !matches!(env_signal, WeatherSignal::WindLow | WeatherSignal::RainStop) {
             return; // Ignore irrelevant signals early
         }
 
@@ -237,7 +235,7 @@ impl StateMachine {
     pub fn trans_change_mode(&mut self, new_mode: Mode) {
         if new_mode != self.current_mode {
             //TODO  -
-            info!("Changing mode from {:?} to {:?}", self.current_mode, new_mode);
+            info!(current_mode = ?self.current_mode, new_mode = ?new_mode, "Changing mode.");
             self.current_mode = new_mode;
         }
     }
@@ -286,6 +284,10 @@ impl StateMachine {
 
         // 3. Recalculate the next day plan for auto_mode, so we can switch at any time and the info is up to date
         self.mode_auto.daily_plan = load_auto_schedule(&self.auto_schedule, current_time);
+    }
+
+    pub fn is_auto_or_wizard(&self) -> bool {
+        matches!(self.current_mode, Mode::Auto | Mode::Wizard)
     }
 }
 

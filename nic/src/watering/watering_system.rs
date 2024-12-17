@@ -89,7 +89,11 @@ impl WateringSystem {
             (self.db.get_daily_et(day_start).unwrap_or(0.0), self.db.get_lastday_rain(day_start).unwrap_or(0.0));
 
         self.sm.do_daily_adjustments(now, daily_et, daily_rain);
-        info!("Performed daily adjustments: ET = {:.2}, Rain = {:.2}", daily_et, daily_rain);
+        info!(
+            event = "daily_adjustments",
+            daily_et = format!("{:.2}", daily_et),
+            daily_rain = format!("{:.2}", daily_rain),
+        );
     }
 
     pub fn get_state(&self) -> WateringStateResponse {
@@ -126,8 +130,8 @@ pub async fn run_watering_system(
     app_state: Arc<AppState>,
     starting_mode: Option<Mode>,
     stop_signal: tokio::sync::watch::Receiver<bool>,
-    end_time: Option<i64>,                           // Optional parameter for simulation
-    ws: Option<&mut WateringSystem>,                 // Optional parameter for simulation
+    end_time: Option<i64>,           // Optional parameter for simulation
+    ws: Option<&mut WateringSystem>, // Optional parameter for simulation
     cfg: Watering,
 ) -> Result<(), AppError> {
     let mut now = app_state.time_provider.now();
