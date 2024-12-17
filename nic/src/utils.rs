@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc};
 
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Timelike, Utc, Weekday};
 use tokio::sync::{
@@ -74,6 +74,19 @@ pub fn load_sectors_into_hashmap(sectors: Vec<SectorInfo>) -> HashMap<u32, Secto
             (sector.id, sec)
         })
         .collect()
+}
+
+pub fn remove_folder_from_path(path: &Path, target_folder: &str) -> PathBuf {
+    let mut new_path = PathBuf::new();
+
+    for component in path.components() {
+        // Check if the current component matches the target folder
+        if component.as_os_str() != target_folder {
+            new_path.push(component);
+        }
+    }
+
+    new_path
 }
 
 #[cfg(test)]

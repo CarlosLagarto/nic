@@ -1,18 +1,17 @@
 use nic::{
-    test::utils::{mock_db::MockDatabase, set_ws0},
-    utils::{ux_ts_to_string, load_sectors_into_hashmap, sod},
+    test::utils::{mock_cfg::mock_cfg, set_app_and_ws0},
+    utils::{load_sectors_into_hashmap, sod, ux_ts_to_string},
     watering::{
         ds::{DailyPlan, SectorInfo, WaterSector},
         modes::Mode,
     },
 };
-use std::sync::Arc;
 
 #[tokio::test]
 async fn scheduler_triggers_auto_mode() {
     let now = chrono::Utc::now().timestamp();
-    let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(now, Some(Mode::Auto), mock_db).unwrap();
+    let cfg = mock_cfg();
+    let (_app, mut ws) = set_app_and_ws0(now, Some(Mode::Auto), cfg.watering).unwrap();
     let time_provider = ws.time_provider.clone();
 
     let sectors = load_sectors_into_hashmap(vec![SectorInfo::build(1, 2.5, 1., 30 * 60, 0., 0.5, 0)]);
@@ -51,8 +50,8 @@ async fn scheduler_triggers_auto_mode() {
 #[tokio::test]
 async fn scheduler_triggers_wizard_mode() {
     let now = chrono::Utc::now().timestamp();
-    let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(now, Some(Mode::Wizard), mock_db).unwrap();
+    let cfg = mock_cfg();
+    let (_app, mut ws) = set_app_and_ws0(now, Some(Mode::Wizard), cfg.watering).unwrap();
     let time_provider = ws.time_provider.clone();
 
     let base_time = sod(now);

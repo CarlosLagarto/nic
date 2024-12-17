@@ -1,18 +1,17 @@
 use nic::{
-    test::utils::{mock_db::MockDatabase, set_ws0},
+    test::utils::{mock_cfg::mock_cfg, set_app_and_ws0},
     utils::sod,
     watering::{
-        ds::{CtrlSignal, DailyPlan, WeatherSignal, WaterSector},
+        ds::{CtrlSignal, DailyPlan, WaterSector, WeatherSignal},
         modes::Mode,
     },
 };
-use std::sync::Arc;
 
 #[test]
 fn signal_handling() {
     let ref_time = sod(chrono::Utc::now().timestamp());
-    let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(ref_time, Some(Mode::Wizard), mock_db).unwrap();
+    let cfg = mock_cfg();
+    let (_app, mut ws) = set_app_and_ws0(ref_time, Some(Mode::Wizard), cfg.watering).unwrap();
 
     let start_time = sod(ref_time) + (22 * 3600); //start at 22:00 UTC
     let daily_plan = DailyPlan(vec![
@@ -32,8 +31,8 @@ fn signal_handling() {
 #[test]
 fn weather_signal_handling_all_states() {
     let ref_time = sod(chrono::Utc::now().timestamp());
-    let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(ref_time, Some(Mode::Wizard), mock_db).unwrap();
+    let cfg = mock_cfg();
+    let (_app, mut ws) = set_app_and_ws0(ref_time, Some(Mode::Wizard), cfg.watering).unwrap();
 
     let duration = 30 * 60;
     let start_time = ref_time + 22 * 3600;

@@ -93,16 +93,45 @@ impl MockDatabase {
     }
 }
 
-fn mock_sector() -> Vec<SectorInfo> {
-    let sectors = vec![SectorInfo {
-        id: 1,
-        weekly_target: 2.5,
-        sprinkler_debit: 1.0,
-        max_duration: 30 * 3600,
-        percolation_rate: 0.5,
-        progress: 0.,
-        last_water: 0,
-    }];
+pub fn mock_sector() -> Vec<SectorInfo> {
+    let sectors = vec![
+        SectorInfo {
+            id: 1,
+            weekly_target: 2.5,
+            sprinkler_debit: 1.0,
+            max_duration: 30 * 3600,
+            percolation_rate: 0.5,
+            progress: 0.,
+            last_water: 0,
+        },
+        SectorInfo {
+            id: 2,
+            weekly_target: 2.5,
+            sprinkler_debit: 1.0,
+            max_duration: 30 * 3600,
+            percolation_rate: 0.5,
+            progress: 0.,
+            last_water: 0,
+        },
+        SectorInfo {
+            id: 3,
+            weekly_target: 2.5,
+            sprinkler_debit: 1.0,
+            max_duration: 30 * 3600,
+            percolation_rate: 0.5,
+            progress: 0.,
+            last_water: 0,
+        },
+        SectorInfo {
+            id: 4,
+            weekly_target: 2.5,
+            sprinkler_debit: 1.0,
+            max_duration: 30 * 3600,
+            percolation_rate: 0.5,
+            progress: 0.,
+            last_water: 0,
+        },
+    ];
     sectors
 }
 

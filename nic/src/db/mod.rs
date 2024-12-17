@@ -1,5 +1,5 @@
 use crate::utils::ux_ts_to_string;
-use crate::watering::ds::{Cycle, DailyPlan, SectorInfo, WaterSector, WateringEvent, WeatherConditions, WeeklyPlan};
+use crate::watering::ds::{Cycle, DailyPlan, SectorInfo, WaterSector, WateringEvent, WeatherConditions};
 use crate::watering::watering_alg::{Schedule, ScheduleEntry, ScheduleType};
 use async_trait::async_trait;
 use chrono::Weekday;
@@ -225,18 +225,18 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS auto_schedules (
             day_of_week INTEGER NOT NULL, -- Weekday as an integer (0 for Monday, 6 for Sunday)
             sector_id INTEGER NOT NULL,
-            start_time INTEGER NOT NULL, -- Start time as a Unix UTC timestamp
+            start_secs_from_day_start INTEGER NOT NULL, 
             duration INTEGER NOT NULL,     -- Duration of watering in seconds
-            PRIMARY KEY (day_of_week, sector_id, start_time)
+            PRIMARY KEY (day_of_week, sector_id, start_secs_from_day_start)
         );
 
-        CREATE TABLE IF NOT EXISTS wizard_schedule (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date INTEGER NOT NULL,   -- Unix UTC timestamp for the date
-            sector_id INTEGER NOT NULL,
-            start_time INTEGER NOT NULL,  -- Start time as Unix UTC timestamp
-            duration INTEGER NOT NULL  -- Duration in seconds
-        );
+        --CREATE TABLE IF NOT EXISTS wizard_schedule (
+        --    id INTEGER PRIMARY KEY AUTOINCREMENT,
+        --    date INTEGER NOT NULL,   -- Unix UTC timestamp for the date
+        --    sector_id INTEGER NOT NULL,
+        --    start_time INTEGER NOT NULL,  -- Start time as Unix UTC timestamp
+        --    duration INTEGER NOT NULL  -- Duration in seconds
+        --);
         ";
 
     conn.execute_batch(query)?;
@@ -244,15 +244,16 @@ pub fn initialize(conn: &Connection) -> Result<()> {
 }
 
 pub fn load_sectors(conn: &Connection) -> Result<Vec<SectorInfo>> {
-    let mut stmt = conn
-        .prepare("SELECT id, sprinkler_debit, percolation_rate, max_duration, weekly_target, progress, last_water FROM sectors")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, sprinkler_debit, percolation_rate, max_duration, weekly_target, progress, last_water FROM sectors",
+    )?;
     let sectors = stmt
         .query_map([], |row| {
             Ok(SectorInfo {
                 id: row.get(0)?,
                 sprinkler_debit: row.get(1)?,
                 percolation_rate: row.get(2)?,
-                max_duration: row.get::<_, i64>(3)? * 60,
+                max_duration: row.get::<_, i64>(3)?,
                 weekly_target: row.get(4)?,
                 progress: row.get(5)?,
                 last_water: row.get(6)?,
@@ -268,7 +269,7 @@ pub fn load_cycles(conn: &Connection) -> Result<Vec<Cycle>> {
     let mut cycles_map: std::collections::HashMap<i64, Vec<WaterSector>> = std::collections::HashMap::new();
 
     let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)? * 60_i64))
+        Ok((row.get::<_, i64>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?))
     })?;
 
     for row in rows {
@@ -284,7 +285,7 @@ pub fn load_cycles(conn: &Connection) -> Result<Vec<Cycle>> {
 
 pub fn load_auto_schedule(conn: &Connection) -> Result<Schedule> {
     let mut stmt = conn.prepare(
-        "SELECT day_of_week, sector_id, start_time, duration FROM auto_schedules ORDER BY day_of_week, sector_id, start_time",
+        "SELECT day_of_week, sector_id, start_secs_from_day_start, duration FROM auto_schedules ORDER BY day_of_week, sector_id, start_secs_from_day_start",
     )?;
     // Use a HashMap to group sector and duration entries by day_of_week
     let mut entries_map: std::collections::HashMap<Weekday, DailyPlan> = std::collections::HashMap::new();
@@ -297,7 +298,7 @@ pub fn load_auto_schedule(conn: &Connection) -> Result<Schedule> {
                 Weekday::from_i64(week_day).unwrap()
             },
             row.get::<_, u32>(1)?, // Sector ID
-            row.get::<_, i64>(2)?, // Start time
+            row.get::<_, i64>(2)?, // Start seconds from day start
             row.get::<_, i64>(3)?, // Duration
         ))
     })?;
@@ -327,7 +328,7 @@ pub fn save_auto_schedule(conn: &mut Connection, schedule: &Schedule) -> rusqlit
         if let ScheduleType::Weekday(day_of_week) = entry.schedule_type {
             for &sec in &entry.start_times.0 {
                 tx.execute(
-                    "INSERT INTO auto_schedules (day_of_week, sector_id, start_time, duration) VALUES (?1, ?2, ?3, ?4)",
+                    "INSERT INTO auto_schedules (day_of_week, sector_id, start_secs_from_day_start, duration) VALUES (?1, ?2, ?3, ?4)",
                     rusqlite::params![day_of_week.num_days_from_monday(), sec.id, sec.start, sec.duration],
                 )?;
             }
@@ -337,20 +338,20 @@ pub fn save_auto_schedule(conn: &mut Connection, schedule: &Schedule) -> rusqlit
     tx.commit()
 }
 
-pub fn store_plan_in_db(conn: &mut Connection, weekly_plan: &WeeklyPlan) -> rusqlite::Result<()> {
-    let tx = conn.transaction()?;
-    tx.execute_batch("DELETE FROM wizard_schedule")?; // Clear previous schedule
-    for (date, sessions) in weekly_plan {
-        for sec in &sessions.0 {
-            tx.execute(
-                "INSERT INTO wizard_schedule (date, sector_id, start_time, duration) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![date, sec.id, sec.start, sec.duration],
-            )?;
-        }
-    }
+// pub fn store_plan_in_db(conn: &mut Connection, weekly_plan: &WeeklyPlan) -> rusqlite::Result<()> {
+//     let tx = conn.transaction()?;
+//     tx.execute_batch("DELETE FROM wizard_schedule")?; // Clear previous schedule
+//     for (date, sessions) in weekly_plan {
+//         for sec in &sessions.0 {
+//             tx.execute(
+//                 "INSERT INTO wizard_schedule (date, sector_id, start_time, duration) VALUES (?1, ?2, ?3, ?4)",
+//                 rusqlite::params![date, sec.id, sec.start, sec.duration],
+//             )?;
+//         }
+//     }
 
-    tx.commit()
-}
+//     tx.commit()
+// }
 
 pub fn log_watering_event(conn: &Connection, evt: WateringEvent) -> Result<()> {
     conn.execute(
@@ -360,7 +361,7 @@ pub fn log_watering_event(conn: &Connection, evt: WateringEvent) -> Result<()> {
             evt.cycle_id,
             evt.sector.id,
             ux_ts_to_string(evt.sector.start),
-            evt.sector.duration as f64 / 60.,
+            evt.sector.duration_minutes(),
             evt.water_applied,
             evt.mode.to_string()
         ],
@@ -401,7 +402,10 @@ mod test {
 
     use crate::{
         db::load_auto_schedule,
-        watering::{ds::{DailyPlan, WaterSector}, watering_alg::ScheduleType},
+        watering::{
+            ds::{DailyPlan, WaterSector},
+            watering_alg::ScheduleType,
+        },
     };
 
     #[test]
@@ -410,24 +414,24 @@ mod test {
 
         // Adjusted table schema to match the refactored version
         conn.execute(
-        "CREATE TABLE auto_schedules (day_of_week INTEGER, sector_id INTEGER, start_time INTEGER, duration INTEGER)",
+        "CREATE TABLE auto_schedules (day_of_week INTEGER, sector_id INTEGER, start_secs_from_day_start INTEGER, duration INTEGER)",
         [],
     )
     .unwrap();
 
         // Insert test data with Unix UTC timestamps
         conn.execute(
-            "INSERT INTO auto_schedules (day_of_week, sector_id, start_time, duration) VALUES (0, 101, 21600, 1800)",
+            "INSERT INTO auto_schedules (day_of_week, sector_id, start_secs_from_day_start, duration) VALUES (0, 101, 21600, 1800)",
             [],
         )
         .unwrap(); // Monday, sector 101, start time 06:00 UTC, 30 min duration
         conn.execute(
-            "INSERT INTO auto_schedules (day_of_week, sector_id, start_time, duration) VALUES (0, 102, 28800, 3600)",
+            "INSERT INTO auto_schedules (day_of_week, sector_id, start_secs_from_day_start, duration) VALUES (0, 102, 28800, 3600)",
             [],
         )
         .unwrap(); // Monday, sector 102, start time 08:00 UTC, 60 min duration
         conn.execute(
-            "INSERT INTO auto_schedules (day_of_week, sector_id, start_time, duration) VALUES (1, 201, 18000, 1200)",
+            "INSERT INTO auto_schedules (day_of_week, sector_id, start_secs_from_day_start, duration) VALUES (1, 201, 18000, 1200)",
             [],
         )
         .unwrap(); // Tuesday, sector 201, start time 05:00 UTC, 20 min duration

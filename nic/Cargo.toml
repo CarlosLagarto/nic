@@ -10,6 +10,7 @@ axum-server = "0.7.1"
 chrono = "0.4"
 futures-util = "0.3"
 
+getopts = "0.2"
 
 mockall = "0.13.1"
 num-traits = "0.2.19"
@@ -22,12 +23,14 @@ serde = { version = "1.0.216", features = ["derive"] }
 
 thiserror = "2.0.7"
 tokio = { version = "1.42.0", features = ["full"] }
+
+toml = "0.8.19"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [dev-dependencies]
 tower = "0.5.2"
-hyper = { version = "1.5.1", features = ["full"] }
+hyper = { version = "1.5.2", features = ["full"] }
 
 # test-utilities = { path = "test-utilities" }
 

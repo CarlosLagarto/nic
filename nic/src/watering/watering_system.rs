@@ -5,6 +5,7 @@ use super::{
 };
 use crate::{
     api::{CycleResponse, WateringStateResponse},
+    config::Watering,
     db::DatabaseTrait,
     error::AppError,
     sensors::interface::SensorController,
@@ -30,13 +31,25 @@ pub struct WateringSystem {
 
 impl WateringSystem {
     pub fn new(
-        controller: Arc<dyn SensorController>, db: Arc<dyn DatabaseTrait>, time_provider: Arc<dyn TimeProvider>,
-        starting_mode: Option<Mode>, web_tx: Arc<Sender<CtrlSignal>>, sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
-        current_time: i64,
+        app_state: Arc<AppState>, starting_mode: Option<Mode>, current_time: i64, cfg: Watering,
     ) -> Result<Self, AppError> {
-        let sectors = db.load_sectors()?;
-        let state = StateMachine::new(controller.clone(), starting_mode, sectors, current_time, db.clone());
-        Ok(WateringSystem { sm: state, db, controller, time_provider, web_tx, sm_rx })
+        let sectors = app_state.db.load_sectors()?;
+        let state = StateMachine::new(
+            app_state.sensors_ctrl.clone(),
+            starting_mode,
+            sectors,
+            current_time,
+            app_state.db.clone(),
+            cfg,
+        )?;
+        Ok(WateringSystem {
+            sm: state,
+            db: app_state.db.clone(),
+            controller: app_state.sensors_ctrl.clone(),
+            time_provider: app_state.time_provider.clone(),
+            web_tx: app_state.web_tx.clone(),
+            sm_rx: app_state.sm_rx.clone(),
+        })
     }
 
     async fn handle_control_signals(&mut self, current_time: i64) {
@@ -85,7 +98,7 @@ impl WateringSystem {
         let state = match &self.sm.state {
             SMState::Idle => "Idle".to_string(),
             SMState::Watering(sec) => {
-                format!("Watering sector {} for {:.2} minutes", sec.id, (sec.duration as f64 / 60.))
+                format!("Watering sector {} for {:.2} minutes", sec.id, sec.duration_minutes())
             }
             SMState::Paused(data) => match *data.state {
                 SMState::Watering(ref sec) => format!("Paused sector {}", sec.id),
@@ -112,28 +125,17 @@ impl WateringSystem {
 pub async fn run_watering_system(
     app_state: Arc<AppState>,
     starting_mode: Option<Mode>,
-    stop_signal: tokio::sync::watch::Receiver<bool>, // Add stop signal
+    stop_signal: tokio::sync::watch::Receiver<bool>,
     end_time: Option<i64>,                           // Optional parameter for simulation
     ws: Option<&mut WateringSystem>,                 // Optional parameter for simulation
+    cfg: Watering,
 ) -> Result<(), AppError> {
     let mut now = app_state.time_provider.now();
-    let ws = if let Some(ws1) = ws {
-        ws1
-    } else {
-        &mut WateringSystem::new(
-            app_state.sensors_ctrl.clone(),
-            app_state.db.clone(),
-            app_state.time_provider.clone(),
-            starting_mode,
-            app_state.web_tx.clone(),
-            app_state.sm_rx.clone(),
-            now,
-        )?
-    };
+    let ws = if let Some(ws1) = ws { ws1 } else { &mut WateringSystem::new(app_state, starting_mode, now, cfg)? };
 
     let mut last_day = sod(now);
     let stop_signal = stop_signal; // Clone the receiver for use in the loop
-    while end_time.map_or(true, |end| now < end) && !*stop_signal.borrow(){
+    while end_time.map_or(true, |end| now < end) && !*stop_signal.borrow() {
         now = ws.time_provider.now();
 
         // in the fn we validate if it is a new day and a new week

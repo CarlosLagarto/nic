@@ -1,7 +1,7 @@
 use chrono::{TimeZone, Utc};
 use nic::{
-    test::utils::{mock_db::*, set_app_and_ws, set_ws0},
-    utils::{ux_ts_to_string, load_sectors_into_hashmap, parse_datetime_to_utc_timestamp, sod, start_log},
+    test::utils::{mock_cfg::mock_cfg, set_app_and_ws0},
+    utils::{load_sectors_into_hashmap, parse_datetime_to_utc_timestamp, sod, start_log, ux_ts_to_string},
     watering::{
         ds::{DailyPlan, SectorInfo, WaterSector},
         modes::Mode,
@@ -10,14 +10,13 @@ use nic::{
         watering_system::run_watering_system,
     },
 };
-use std::sync::Arc;
 
 #[test]
 fn watering_at_right_times() {
     let now = parse_datetime_to_utc_timestamp("2024-11-29T17:00:00+00:00", "%Y-%m-%dT%H:%M:%S%z").unwrap();
     let allowed_timeframe = WaterWin::new(now, 22, 8);
-    let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(now, Some(Mode::Wizard), mock_db).unwrap();
+    let cfg = mock_cfg();
+    let (_app, mut ws) = set_app_and_ws0(now, Some(Mode::Wizard), cfg.watering).unwrap();
     let time_provider = ws.time_provider.clone();
 
     // Set up WizardMode with sectors and schedule
@@ -66,7 +65,8 @@ fn watering_at_right_times() {
 #[tokio::test]
 async fn run_watering_system_fast_forward() {
     let now = Utc.with_ymd_and_hms(2024, 12, 1, 22, 0, 0).unwrap().timestamp(); // 6:00 AM UTC
-    let (app_state, mut ws) = set_app_and_ws(now, Some(Mode::Wizard)).unwrap();
+    let cfg = mock_cfg();
+    let (app_state, mut ws) = set_app_and_ws0(now, Some(Mode::Wizard), cfg.watering).unwrap();
     let time_provider = ws.time_provider.clone();
     let allowed_timeframe = WaterWin::new(now, 22, 8); // 10 PM to 6 AM
     ws.sm.timeframe = allowed_timeframe;
@@ -81,12 +81,6 @@ async fn run_watering_system_fast_forward() {
     ]);
     ws.sm.sectors = sectors;
 
-    let auto_daily_plan = DailyPlan(
-        vec![WaterSector::new(1, sod(now) + (8 * 3600), 60 * 60)], // Sector 1: 8 AM start
-    );
-
-    ws.sm.mode_auto.daily_plan = vec![auto_daily_plan];
-
     // TODO: now it is in Wizard Mode.  Make a variant of the test to switch modes
     // let mut active_mode = app_state.watering_system.active_mode.write().await;
     // let auto_mode = app_state.watering_system.auto_mode.read().await.clone();
@@ -94,7 +88,6 @@ async fn run_watering_system_fast_forward() {
     assert_eq!(ws.sm.current_mode, Mode::Wizard, "Active mode should be Wizard Mode.");
 
     let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    // let rx_clone = shutdown_rx.clone();
 
     // Broadcast channel for control signals
     _ = run_watering_system(
@@ -103,11 +96,44 @@ async fn run_watering_system_fast_forward() {
         shutdown_rx,
         Some(now + simulation_duration_seconds),
         Some(&mut ws),
+        cfg.watering,
     )
     .await;
 
     // Validate the results
     for sector in ws.sm.sectors.values() {
         assert!(sector.progress > 0.0, "Sector {} should have positive progress after simulation.", sector.id);
+    }
+}
+
+#[tokio::test]
+async fn test_auto_mode_schedule_loading() {
+    let current_time = Utc.with_ymd_and_hms(2023, 11, 27, 6, 0, 0).unwrap().timestamp(); // Monday
+    let cfg = mock_cfg();
+    let (_app_state, ws) = set_app_and_ws0(current_time, Some(Mode::Auto), cfg.watering).unwrap();
+
+    // Verify the loaded schedule matches the mock
+    assert_eq!(ws.sm.mode_auto.daily_plan.len(), 3);
+    let plan = &ws.sm.mode_auto.daily_plan[0];
+    assert_eq!(plan.0.len(), 2);
+    assert_eq!(plan.0[0].id, 1);
+    assert_eq!(plan.0[1].id, 2);
+}
+
+#[tokio::test]
+async fn test_auto_mode_trigger_watering() {
+    let current_time = Utc.with_ymd_and_hms(2023, 11, 27, 6, 0, 0).unwrap().timestamp(); // Monday
+    let cfg = mock_cfg();
+    let (_app_state, mut ws) = set_app_and_ws0(current_time, Some(Mode::Auto), cfg.watering).unwrap();
+
+    // Simulate an update loop
+    for time in (current_time..current_time + 10_800).step_by(900) {
+        ws.sm.update(time);
+
+        if time == current_time + 3600 {
+            assert!(matches!(ws.sm.state, SMState::Watering(WaterSector { id: 2, .. })));
+        } else if time == current_time + 7200 {
+            assert!(matches!(ws.sm.state, SMState::Watering(WaterSector { id: 3, .. })));
+        }
     }
 }

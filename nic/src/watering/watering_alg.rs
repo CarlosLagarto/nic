@@ -1,5 +1,7 @@
 use super::{
-    ds::{DailyPlan, SectorInfo, WaterSector}, water_window::WaterWin, DAILY_PERCOLATION_FACTOR, SECTOR_TRANSITION_SECS
+    ds::{DailyPlan, SectorInfo, WaterSector},
+    water_window::WaterWin,
+    DAILY_PERCOLATION_FACTOR, SECS_TO_HOUR_CONV,
 };
 use crate::utils::get_week_day_from_ts;
 use tracing::debug;
@@ -55,9 +57,11 @@ pub fn calc_irrigation_time(sector: &SectorInfo) -> Option<i64> {
     Some(irrigation_time.min(sector.max_duration))
 }
 
-pub fn calc_daily_plan(sectors: &[SectorInfo], current_time: i64, timeframe: WaterWin) -> Vec<DailyPlan> {
+pub fn calc_wizard_daily_plan(
+    sectors: &[SectorInfo], current_time: i64, timeframe: WaterWin, sec_transition_secs: i64, min_watering_secs: i64,
+) -> Vec<DailyPlan> {
     let remaining_days = calculate_remaining_days(current_time);
-    let mut plans = generate_daily_plan(sectors, remaining_days, timeframe);
+    let mut plans = gen_wizard_daily_plan(sectors, remaining_days, timeframe, sec_transition_secs, min_watering_secs);
     plans.iter_mut().for_each(|daily_plan| {
         daily_plan.0.sort_by_key(|sector| sector.start);
     });
@@ -66,8 +70,11 @@ pub fn calc_daily_plan(sectors: &[SectorInfo], current_time: i64, timeframe: Wat
 
 /// Is always called at new day (midnight), which means that when turned on, only will water next day morning.
 /// If one needs immediate watering, should do a manual watering
-#[allow(clippy::option_map_unit_fn)]  //complexity/readability.
-pub fn generate_daily_plan(sectors: &[SectorInfo], remaining_days: i64, mut timeframe: WaterWin) -> Vec<DailyPlan> {
+#[allow(clippy::option_map_unit_fn)] //complexity/readability.
+fn gen_wizard_daily_plan(
+    sectors: &[SectorInfo], remaining_days: i64, mut timeframe: WaterWin, sec_transition_secs: i64,
+    min_watering_secs: i64,
+) -> Vec<DailyPlan> {
     let mut plans = Vec::with_capacity(2); // at max we have a morning and evening session
 
     // Clone sectors to modify their progress during calculation without altering original values
@@ -78,12 +85,26 @@ pub fn generate_daily_plan(sectors: &[SectorInfo], remaining_days: i64, mut time
             timeframe.next_mut();
             continue; // Skip this day if no sector needs watering
         }
-        let (need_evening, mut daily_plan) = get_next_watering_for_day(&mut sectors, &mut timeframe, rem_days, true);
+        let (need_evening, mut daily_plan) = get_next_wiz_watering_for_day(
+            &mut sectors,
+            &mut timeframe,
+            rem_days,
+            true,
+            sec_transition_secs,
+            min_watering_secs,
+        );
         daily_plan.take().map(|p| plans.push(p));
         // advance timeframe.  either will serve the next day at 22, and also the next morning if the evening whatering is not needed
         timeframe.next_mut();
         if need_evening {
-            let (_, mut daily_plan) = get_next_watering_for_day(&mut sectors, &mut timeframe, rem_days, false);
+            let (_, mut daily_plan) = get_next_wiz_watering_for_day(
+                &mut sectors,
+                &mut timeframe,
+                rem_days,
+                false,
+                sec_transition_secs,
+                min_watering_secs,
+            );
             daily_plan.take().map(|p| plans.push(p));
         }
         if !plans.is_empty() {
@@ -93,8 +114,9 @@ pub fn generate_daily_plan(sectors: &[SectorInfo], remaining_days: i64, mut time
     plans
 }
 
-fn get_next_watering_for_day(
-    sectors: &mut [SectorInfo], timeframe: &mut WaterWin, remaining_days: i64, morning: bool,
+fn get_next_wiz_watering_for_day(
+    sectors: &mut [SectorInfo], timeframe: &mut WaterWin, remaining_days: i64, morning: bool, sec_transition_secs: i64,
+    min_watering_secs: i64,
 ) -> (bool, Option<DailyPlan>) {
     let mut daily_plan = DailyPlan::new();
     let mut need_evening = false;
@@ -105,7 +127,7 @@ fn get_next_watering_for_day(
     for sector in sector_iter {
         // Calculate remaining weekly water needs for the sector
         let remaining_weekly_need = (sector.weekly_target - sector.progress).max(0.0);
-        let daily_capacity = (sector.max_duration as f64 / 3600.0) * sector.sprinkler_debit;
+        let daily_capacity = (sector.max_duration as f64 * SECS_TO_HOUR_CONV) * sector.sprinkler_debit;
 
         // Skip the sector if the (remaining days - 1) are sufficient to fulfill its needs
         if remaining_weekly_need <= daily_capacity * (remaining_days - 1) as f64 {
@@ -116,20 +138,19 @@ fn get_next_watering_for_day(
         }
 
         let secs_irrigation_time = calc_irrigation_time(sector).unwrap_or(0);
-        if secs_irrigation_time <= 300 {
+        if secs_irrigation_time <= min_watering_secs {
             continue; // Skip sectors with negligible needs
         }
 
-        let proposed_start =
-            if morning { water_time - secs_irrigation_time - SECTOR_TRANSITION_SECS } else { water_time };
+        let proposed_start = if morning { water_time - secs_irrigation_time - sec_transition_secs } else { water_time };
 
         daily_plan.0.push(WaterSector::new(sector.id, proposed_start, secs_irrigation_time));
-        sector.progress += secs_irrigation_time as f64 * (sector.sprinkler_debit / 3600.0);
+        sector.progress += secs_irrigation_time as f64 * (sector.sprinkler_debit * SECS_TO_HOUR_CONV);
 
         if morning {
             water_time = proposed_start; // Move earlier for morning sessions
         } else {
-            water_time += secs_irrigation_time + SECTOR_TRANSITION_SECS; // Move later for evening sessions
+            water_time += secs_irrigation_time + sec_transition_secs; // Move later for evening sessions
         }
     }
     (need_evening, (!daily_plan.0.is_empty()).then_some(daily_plan))
@@ -221,7 +242,7 @@ mod test {
 
         let current_time = timeframe.day_start_time; // Fixed current time
         let remaining_days = calculate_remaining_days(current_time);
-        let weekly_plan = generate_daily_plan(&sectors, remaining_days, timeframe);
+        let weekly_plan = gen_wizard_daily_plan(&sectors, remaining_days, timeframe, 20, 300);
 
         assert!(!weekly_plan.is_empty());
         if let Some(daily_plan) = weekly_plan.get(0) {
@@ -238,7 +259,7 @@ mod test {
         let mut timeframe = WaterWin::new(fixed_time, 6, 12);
 
         // Call the function for morning session
-        let result_morning = get_next_watering_for_day(&mut sectors, &mut timeframe, 1, true);
+        let result_morning = get_next_wiz_watering_for_day(&mut sectors, &mut timeframe, 1, true, 20, 300);
 
         // Assert that a valid daily plan is returned for morning
         assert!(result_morning.1.is_some(), "Morning session should have a valid daily plan.");
@@ -246,7 +267,7 @@ mod test {
         assert!(!daily_plan.0.is_empty(), "Morning session should have watering tasks.");
 
         // Validate evening session
-        let result_evening = get_next_watering_for_day(&mut sectors, &mut timeframe, 7, false);
+        let result_evening = get_next_wiz_watering_for_day(&mut sectors, &mut timeframe, 7, false, 20, 300);
 
         // Assert that the evening session is valid only if more progress is needed
         if sectors.iter().any(|sec| sec.weekly_target > sec.progress) {
@@ -269,7 +290,7 @@ mod test {
         let timeframe = WaterWin::new(fixed_time, 6, 12);
         let current_time = timeframe.day_start_time + 10;
 
-        let daily_plan = calc_daily_plan(&sectors, current_time, timeframe);
+        let daily_plan = calc_wizard_daily_plan(&sectors, current_time, timeframe, 20, 300);
 
         assert!(!daily_plan.is_empty());
         let daily_plan = daily_plan.get(0).unwrap();

@@ -61,12 +61,17 @@ impl SectorInfo {
 pub struct WaterSector {
     pub id: u32,
     pub start: i64,
+    /// in seconds
     pub duration: i64,
 }
 
 impl WaterSector {
     pub fn new(id: u32, start: i64, duration: i64) -> Self {
         Self { id, start, duration }
+    }
+
+    pub fn duration_minutes(&self)->f64{
+        self.duration as f64 / 60.
     }
 }
 

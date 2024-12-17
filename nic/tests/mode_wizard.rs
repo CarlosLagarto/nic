@@ -1,15 +1,15 @@
 use chrono::{TimeZone, Utc};
-use nic::test::utils::mock_db::MockDatabase;
-use nic::test::utils::set_ws0;
+use nic::test::utils::mock_cfg::mock_cfg;
+use nic::test::utils::set_app_and_ws0;
 use nic::watering::ds::{DailyPlan, SectorInfo, WaterSector};
 use nic::watering::modes::Mode;
 use nic::watering::state_machine::SMState;
-use std::sync::Arc;
 
 #[tokio::test]
 async fn execute_wizard_mode() {
     let current_date = Utc.with_ymd_and_hms(2023, 11, 25, 22, 0, 0).unwrap().timestamp(); // 6:00 AM UTC
-    let mut ws = set_ws0(current_date, Some(Mode::Wizard), None).unwrap();
+    let cfg = mock_cfg();
+    let (_app, mut ws) = set_app_and_ws0(current_date, Some(Mode::Wizard), cfg.watering).unwrap();
     // Mock sectors with progress and targets
     ws.sm.sectors.insert(1, SectorInfo::build(1, 1.8, 1.0, 30 * 60, 1., 0.5, 0));
     ws.sm.sectors.insert(2, SectorInfo::build(2, 2.5, 0.8, 20 * 60, 1., 0.5, 0));
@@ -36,8 +36,8 @@ async fn execute_wizard_mode() {
 #[test]
 fn handle_daily_adjustments() {
     let ref_time = Utc.with_ymd_and_hms(2024, 12, 10, 22, 0, 0).unwrap().timestamp(); // 6:00 AM UTC
-    let mock_db = Some(Arc::new(MockDatabase::new()));
-    let mut ws = set_ws0(ref_time, Some(Mode::Wizard), mock_db).unwrap();
+    let cfg = mock_cfg();
+    let (_app, mut ws) = set_app_and_ws0(ref_time, Some(Mode::Wizard), cfg.watering).unwrap();
 
     ws.sm.sectors.insert(1, SectorInfo::build(1, 1.8, 1.0, 30 * 60, 1., 0., 0));
     ws.sm.sectors.insert(2, SectorInfo::build(2, 2.5, 0.8, 20 * 60, 1., 0., 0));

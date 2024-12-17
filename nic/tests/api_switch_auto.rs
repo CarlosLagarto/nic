@@ -1,9 +1,11 @@
 use chrono::{TimeZone, Utc};
 use hyper::StatusCode;
 use nic::api::run_web_server;
-use nic::test::utils::set_app_and_ws;
+use nic::test::utils::mock_cfg::mock_cfg;
+use nic::test::utils::mock_db::mock_sector;
+use nic::test::utils::set_app_and_ws0;
 use nic::utils::{load_sectors_into_hashmap, start_log};
-use nic::watering::ds::{DailyPlan, SectorInfo, WaterSector};
+use nic::watering::ds::{DailyPlan, WaterSector};
 use nic::watering::modes::*;
 use nic::watering::watering_system::run_watering_system;
 use nic::{
@@ -11,29 +13,6 @@ use nic::{
     watering::ds::CtrlSignal,
 };
 use tracing::error;
-
-fn mock_sectors() -> Vec<SectorInfo> {
-    vec![
-        SectorInfo {
-            id: 1,
-            sprinkler_debit: 0.5,  // cm/hour
-            percolation_rate: 0.1, // mm/hour
-            max_duration: 3600,    // 1 hour
-            weekly_target: 3.0,    // 3 cm
-            progress: 0.0,         // no progress yet
-            last_water: 0,
-        },
-        SectorInfo {
-            id: 2,
-            sprinkler_debit: 0.8,
-            percolation_rate: 0.2,
-            max_duration: 1800, // 30 minutes
-            weekly_target: 2.0,
-            progress: 1.0, // some progress already
-            last_water: 0,
-        },
-    ]
-}
 
 fn mock_schedule(current_time: i64) -> Vec<DailyPlan> {
     vec![DailyPlan(vec![
@@ -45,14 +24,15 @@ fn mock_schedule(current_time: i64) -> Vec<DailyPlan> {
 #[tokio::test]
 async fn watering_system_response_to_routes_function_calls() {
     let current_time = Utc.with_ymd_and_hms(2023, 11, 25, 22, 0, 0).unwrap().timestamp();
-    let (app_state, mut ws) = set_app_and_ws(current_time, Some(Mode::Auto)).unwrap();
+    let cfg = mock_cfg();
+    let (app_state, mut ws) = set_app_and_ws0(current_time, Some(Mode::Auto), cfg.watering).unwrap();
     let app_state_clone = app_state.clone();
-    ws.sm.sectors = load_sectors_into_hashmap(mock_sectors());
+    ws.sm.sectors = load_sectors_into_hashmap(mock_sector());
     ws.sm.mode_auto = ModeAuto { daily_plan: mock_schedule(current_time) };
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    // let rx_clone = shutdown_rx.clone();
     let watering_system_task = tokio::spawn(async move {
-        let _ = run_watering_system(app_state_clone, Some(Mode::Auto), shutdown_rx,None, Some(&mut ws)).await;
+        let _ = run_watering_system(app_state_clone, Some(Mode::Auto), shutdown_rx, None, Some(&mut ws), cfg.watering)
+            .await;
     });
 
     app_state.sm_tx.send(CtrlSignal::ChgMode(Mode::Manual)).unwrap();
@@ -85,19 +65,18 @@ async fn watering_system_response_to_routes_function_calls() {
         assert!(resp.state.is_some());
     }
 
-    // Clean up   
+    // Clean up
     _ = shutdown_tx.send(true);
     watering_system_task.abort();
- 
 }
 
 #[tokio::test]
 async fn test_full_web_server() {
     let current_time = Utc.with_ymd_and_hms(2023, 11, 25, 22, 0, 0).unwrap().timestamp();
-
-    let (app_state, mut ws) = set_app_and_ws(current_time, Some(Mode::Auto)).unwrap();
+    let cfg = mock_cfg();
+    let (app_state, mut ws) = set_app_and_ws0(current_time, Some(Mode::Auto), cfg.watering).unwrap();
     let app_state_clone = app_state.clone();
-    ws.sm.sectors = load_sectors_into_hashmap(mock_sectors());
+    ws.sm.sectors = load_sectors_into_hashmap(mock_sector());
     ws.sm.mode_auto = ModeAuto { daily_plan: mock_schedule(current_time) };
 
     let time_provider = ws.time_provider.clone();
@@ -105,12 +84,10 @@ async fn test_full_web_server() {
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let rx_clone = shutdown_rx.clone();
-    // let end_time = Some(current_time + 30 * 86400) ;
     let watering_system_task = tokio::spawn(async move {
-        let _ = run_watering_system(app_state_clone, Some(Mode::Auto),rx_clone, None, Some(&mut ws)).await;
+        let _ =
+            run_watering_system(app_state_clone, Some(Mode::Auto), rx_clone, None, Some(&mut ws), cfg.watering).await;
     });
-
-    // tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let app_state_clone = app_state.clone();
     let rx_clone = shutdown_rx.clone();
