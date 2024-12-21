@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64px" height="64px" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Outer Circle for Smart Controller -->
+  <circle cx="12" cy="12" r="10" stroke="#4CAF50" fill="#E8F5E9" />
+  
+  <!-- Sprinkler Droplet -->
+  <path d="M12 8C13 8 14 9 14 10C14 11 13 12 12 12C11 12 10 11 10 10C10 9 11 8 12 8Z" fill="#4CAF50"/>
+
+  <!-- AI Lines -->
+  <line x1="12" y1="2" x2="12" y2="6" stroke="#4CAF50" />
+  <line x1="12" y1="18" x2="12" y2="22" stroke="#4CAF50" />
+  <line x1="2" y1="12" x2="6" y2="12" stroke="#4CAF50" />
+  <line x1="18" y1="12" x2="22" y2="12" stroke="#4CAF50" />
+
+  <!-- AI Nodes -->
+  <circle cx="6" cy="6" r="1.5" fill="#4CAF50" />
+  <circle cx="18" cy="6" r="1.5" fill="#4CAF50" />
+  <circle cx="6" cy="18" r="1.5" fill="#4CAF50" />
+  <circle cx="18" cy="18" r="1.5" fill="#4CAF50" />
+</svg>

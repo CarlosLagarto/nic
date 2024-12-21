@@ -1,0 +1,55 @@
+{
+  "name": "nic_pwa",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "serve": "vue-cli-service serve",
+    "build": "vue-cli-service build",
+    "lint": "vue-cli-service lint"
+  },
+  "dependencies": {
+    "@vue/compiler-sfc": "^3.5.13",
+    "axios": "^1.7.9",
+    "chart.js": "^4.4.7",
+    "core-js": "^3.39.0",
+    "cssnano": "^7.0.6",
+    "pinia": "^2.3.0",
+    "register-service-worker": "^1.7.2",
+    "rimraf": "^6.0.1",
+    "socket.io-client": "^4.8.1",
+    "tailwindcss": "^3.4.16",
+    "tough-cookie": "^5.0.0",
+    "vue": "^3.5.13",
+    "vue-chartjs": "^5.3.2",
+    "vue-router": "^4.5.0",
+    "vuex": "^4.0.2",
+    "workbox": "^0.0.0",
+    "workbox-webpack-plugin": "^7.3.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/eslint-parser": "^7.25.9",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@vue/cli-plugin-babel": "^5.0.8",
+    "@vue/cli-plugin-eslint": "^5.0.8",
+    "@vue/cli-plugin-pwa": "^5.0.8",
+    "@vue/cli-plugin-router": "~5.0.8",
+    "@vue/cli-service": "^5.0.8",
+    "cross-spawn": "^7.0.6",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "9.1.0",
+    "eslint-plugin-prettier": "5.2.1",
+    "eslint-plugin-vue": "^9.32.0",
+    "eslint-webpack-plugin": "^4.2.0",
+    "postcss": "^8.4.49",
+    "prettier": "3.4.2",
+    "vue-template-compiler": "^2.7.16",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.2.0",
+    "yorkie": "^2.0.0"
+  },
+  "resolutions": {
+    "cross-spawn": "^7.0.0"
+  }
+}

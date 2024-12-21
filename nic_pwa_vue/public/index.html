@@ -1,0 +1,32 @@
+<!-- <!DOCTYPE html> -->
+<html lang="">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'nonce-fixed-nonce-lagarto' 'unsafe-eval'; connect-src 'self' ws://172.20.189.10:8082/ws ws://localhost/ws/weather; style-src 'self' 'nonce-fixed-nonce-lagarto' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';">
+
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="img/icons/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" sizes="192x192" href="img/icons/nic_icon.png" />
+  <title>
+    <%= htmlWebpackPlugin.options.title %>
+  </title>
+  <script nonce="fixed-nonce-lagarto">
+    window.CSP_NONCE = 'fixed-nonce-lagarto';
+  </script>
+</head>
+
+<body>
+  <noscript>
+    <strong>We're sorry but <%= htmlWebpackPlugin.options.title %> doesn't work properly without JavaScript enabled.
+        Please enable it to continue.</strong>
+  </noscript>
+  <div id="app"></div>
+  <!-- built files will be auto injected -->
+</body>
+
+</html>
+

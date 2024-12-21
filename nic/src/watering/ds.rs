@@ -7,6 +7,7 @@ use crate::{
     time::TimeProvider,
 };
 use std::{fmt::Display, sync::Arc};
+use serde::Serialize;
 use tokio::sync::{
     broadcast::{Receiver, Sender},
     Mutex,
@@ -122,9 +123,20 @@ impl Display for WeatherSignal {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct WeatherData{
+    pub rain: f64,
+    pub wind_intensity: f64,
+    pub wind_direction: f64,
+    pub humidity: f64,
+    pub rain_probability: Option<f64>,
+    pub et: Option<f64>
+}
+
 #[derive(Debug, Clone)]
 pub enum CtrlSignal {
     Weather(WeatherSignal),
+    WeatherData(WeatherData),
     StopMachine,
     GenWeather(String),
     DevicesState(String),
@@ -146,8 +158,8 @@ pub struct WeatherConditions {
 pub struct AppState {
     pub db: Arc<dyn DatabaseTrait>,
     pub sm_tx: Arc<Sender<CtrlSignal>>,
-    pub web_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
-    pub web_tx: Arc<Sender<CtrlSignal>>,
+    pub web_rx: tokio::sync::broadcast::Receiver<CtrlSignal>,
+    pub web_tx: tokio::sync::broadcast::Sender<CtrlSignal>,
     pub sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
     pub sensors_ctrl: Arc<dyn SensorController>,
     pub time_provider: Arc<dyn TimeProvider>,
@@ -156,8 +168,8 @@ pub struct AppState {
 impl AppState {
     pub async fn new(
         db: Arc<dyn DatabaseTrait>, sensors_ctrl: Arc<dyn SensorController>, time_provider: Arc<dyn TimeProvider>,
-        sm_tx: Arc<Sender<CtrlSignal>>, sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>, web_tx: Arc<Sender<CtrlSignal>>,
-        web_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
+        sm_tx: Arc<Sender<CtrlSignal>>, sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>, web_tx: tokio::sync::broadcast::Sender<CtrlSignal>,
+        web_rx: tokio::sync::broadcast::Receiver<CtrlSignal>,
     ) -> Result<Arc<Self>, AppError> {
         Ok(Arc::new(AppState { db, sm_tx, sm_rx, web_tx, web_rx, sensors_ctrl, time_provider }))
     }

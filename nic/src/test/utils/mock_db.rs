@@ -2,7 +2,7 @@ use crate::db::{DatabaseCommand, DatabaseTrait};
 use crate::error::AppError;
 use crate::sensors::interface::SensorController;
 use crate::time::TimeProvider;
-use crate::utils::{init_channels, sod};
+use crate::utils::{init_broadcast_channels, init_channels, sod};
 use crate::watering::ds::{AppState, Cycle, DailyPlan, SectorInfo, WaterSector, WateringEvent, WeatherConditions};
 use crate::watering::watering_alg::{Schedule, ScheduleEntry, ScheduleType};
 use async_trait::async_trait;
@@ -16,7 +16,7 @@ pub fn new_with_mock(
     db: Arc<dyn DatabaseTrait>, sensors_ctrl: Arc<dyn SensorController>, time_provider: Arc<dyn TimeProvider>,
 ) -> Result<Arc<AppState>, AppError> {
     let (sm_tx, sm_rx) = init_channels();
-    let (web_tx, web_rx) = init_channels();
+    let (web_tx, web_rx) = init_broadcast_channels();
     Ok(Arc::new(AppState { db, sm_tx, sm_rx, web_tx, web_rx, sensors_ctrl, time_provider }))
 }
 

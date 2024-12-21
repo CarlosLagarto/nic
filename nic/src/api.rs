@@ -5,6 +5,7 @@ use crate::{
     },
     weather::api::{list_devices, query_weather},
 };
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::Path;
 use axum::routing::post;
 use axum::{extract::State, Json};
@@ -19,6 +20,7 @@ pub async fn run_web_server(
     app_state: Arc<AppState>, ip_addr: SocketAddr, stop_signal: watch::Receiver<bool>,
 ) -> Result<(), Box<dyn Error>> {
     let app = Router::new()
+        .route("/ws/weather", get(ws_handler))
         .route("/devices", get(list_devices))
         .route("/weather", get(query_weather))
         .route("/state", get(get_state))
@@ -31,6 +33,25 @@ pub async fn run_web_server(
     let listener = tokio::net::TcpListener::bind(ip_addr).await.unwrap();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal(stop_signal)).await?;
     Ok(())
+}
+
+// Handler for the WebSocket upgrade
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl axum::response::IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
+}
+
+// Handle the WebSocket connection
+async fn handle_ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
+    let mut web_rx = state.web_rx.resubscribe();
+
+    // Send updates to the client
+    while let Ok(update) = web_rx.recv().await {
+        if let CtrlSignal::WeatherData(data) = update {
+            if socket.send(Message::Text(serde_json::to_string(&data).unwrap())).await.is_err() {
+                break; // Exit loop if client disconnects
+            }
+        }
+    }
 }
 
 pub async fn switch_mode(Path(mode): Path<String>, app_state: State<Arc<AppState>>) -> Json<String> {
@@ -86,9 +107,10 @@ impl WateringStateResponse {
 }
 
 pub async fn get_state(State(app_state): State<Arc<AppState>>) -> Json<WateringStateResponse> {
+    let mut web_rx = app_state.web_rx.resubscribe();
     _ = app_state.sm_tx.send(CtrlSignal::GetState); // TODO
     loop {
-        match app_state.web_rx.lock().await.recv().await {
+        match web_rx.recv().await {
             Ok(resp) => {
                 if let CtrlSignal::GetStateResponse(resp) = resp {
                     return Json(resp);
@@ -118,9 +140,10 @@ impl CycleResponse {
     }
 }
 pub async fn get_cycle(State(app_state): State<Arc<AppState>>) -> Json<CycleResponse> {
+    let mut web_rx = app_state.web_rx.resubscribe();
     _ = app_state.sm_tx.send(CtrlSignal::GetCycle); //TODO
     loop {
-        match app_state.web_rx.lock().await.recv().await {
+        match web_rx.recv().await {
             Ok(resp) => {
                 if let CtrlSignal::GetCycleResponse(resp) = resp {
                     return Json(resp);

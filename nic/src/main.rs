@@ -4,7 +4,7 @@ use nic::config::Config;
 use nic::db::Database;
 use nic::sensors::interface::RealSensorController;
 use nic::time::RealTimeProvider;
-use nic::utils::{init_channels, start_log};
+use nic::utils::{init_broadcast_channels, init_channels, start_log};
 use nic::watering::ds::AppState;
 use nic::watering::modes::Mode;
 use nic::watering::watering_system::run_watering_system;
@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let db = Arc::new(Database::new(&cfg.database.name)?);
 
     let (sm_tx, sm_rx) = init_channels();
-    let (web_tx, web_rx) = init_channels();
+    let (web_tx, web_rx) = init_broadcast_channels();
 
     let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 

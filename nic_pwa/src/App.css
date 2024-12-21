@@ -1,0 +1,236 @@
+body, html {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: #f9f9f9;
+  color: #333;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  box-sizing: border-box;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  /* height: 100vh; */
+  overflow-y: auto;
+  /* overflow: hidden; */
+  background: #f4f4f4;
+}
+
+nav {
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  background-color: #673ab8;
+  color: white;
+  text-align: center;
+  /* padding: 10px 0; */
+  line-height: 40px; /* Vertically align text without padding */
+  /*height: 60px; /* Set a fixed height */
+  z-index: 1000; /* Ensure it is above other content */
+  box-sizing: border-box; /* Prevent padding from increasing height */
+}
+
+nav ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  justify-content: space-around;
+}
+
+nav ul li {
+  flex: 1;
+  text-align: center;
+}
+
+nav ul li a {
+  color: white;
+  text-decoration: none;
+  font-size: 1em;
+}
+
+nav ul li a.active {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+button {
+  border-radius: 5px;
+}
+
+main {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.chart-container {
+  width: 100%; /* Full width of the screen */
+  max-width: 150px; /* Adjust for small size */
+  height: 120px; /* Adjust for small size */
+  margin: 10px auto;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background: #f9f9f9;
+  display: flex;
+  flex-direction: column; /* Ensure title and chart align properly */
+  justify-content: space-between; /* Prevent overlap of title and chart */
+}
+
+.charts-grid {
+  display: flex;
+  flex-direction: column; /* Single chart per row */
+  gap: 10px;
+  padding: 10px;
+  overflow-y: auto; /* Enable scrolling for charts */
+  /*max-height: calc(100vh - 160px);  Adjust based on available space (subtract height of summary section) */
+  max-height: calc(100vh - 270px); /* Subtract navbar height (60px) and summary section (160px) */
+  scrollbar-width: thin; /* For Firefox: thin scrollbar */
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent; /* For Firefox */
+}
+
+/* Hide or customize scrollbars for WebKit-based browsers (Chrome, Safari, Edge) */
+.charts-grid::-webkit-scrollbar {
+  width: 5px; /* Thin scrollbar width */
+}
+
+.charts-grid::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2); /* Thumb (scroll indicator) color */
+  border-radius: 10px; /* Rounded edges for thumb */
+}
+
+.charts-grid::-webkit-scrollbar-track {
+  background: transparent; /* Track (scrollbar background) color */
+}
+
+/* Optional: Hide scrollbar completely */
+.charts-grid.hidden-scroll {
+  scrollbar-width: none; /* For Firefox */
+  -ms-overflow-style: none; /* For Internet Explorer and Edge */
+}
+
+.charts-grid.hidden-scroll::-webkit-scrollbar {
+  display: none; /* For WebKit-based browsers */
+}
+
+.summary-container {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  /*align-items: center; Ensure vertical alignment */
+  align-items: stretch; /* Stretch items to have the same height */
+  padding: 10px;
+  gap: 10px;
+}
+
+.summary-section {
+  flex: 1;
+  padding: 10px;
+
+  font-size: 12px; /* Smaller text size for better space utilization */
+  line-height: 1.0;
+  background: #f9f9f9;
+
+  height: 140px; /* Match wind chart height */
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Center the text vertically */
+}
+
+.summary-section h3 {
+  margin: 0 0 10px 0; /* Reduce spacing around the heading */
+  font-size: 16px;
+}
+
+
+.weather-overview {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px; /* Add space between rows */
+}
+
+.weather-overview li {
+  display: flex;
+  justify-content: space-between; /* Space out label and value */
+  align-items: center;
+}
+
+.weather-overview .label {
+  flex: 1; /* Allow labels to align consistently */
+  text-align: left; /* Align text to the left */
+  font-weight: bold;
+}
+
+.weather-overview .value {
+  flex: 1; /* Allow values to align consistently */
+  text-align: right; /* Align values to the right */
+}
+
+.summary-section ul {
+  list-style: none; /* Remove bullets */
+  padding: 0; /* Remove default padding */
+  margin: 0; /* Remove default margin */
+  text-align: left; /* Ensure text is left-aligned */
+}
+
+
+.summary-section ul li {
+  margin: 2px 0; /* Add slight spacing between list items */
+  display: flex; /* Use flexbox to align label and value in one row */
+  justify-content: space-between; /* Ensure proper alignment */
+  align-items: center; /* Center align text vertically */
+  white-space: nowrap; /* Prevent text wrapping */
+}
+
+.summary-section ul li .label {
+  flex: 1; /* Allow labels to take as much space as needed */
+  text-align: left; /* Ensure labels are left-aligned */
+}
+
+.summary-section ul li .value {
+  text-align: right; /* Ensure values are right-aligned */
+  flex-shrink: 0; /* Prevent values from shrinking */
+}
+
+.wind-chart-container {
+  width: 100%;
+  max-width: 150px;
+  height: 140px; /* Reduced size for better layout */
+  margin: 10px auto;
+  padding: 5px;
+  background: #f9f9f9;
+  display: flex;
+  align-items: center; /* Center the chart vertically */
+  justify-content: center; /* Center the chart horizontally */
+  z-index: 9999;
+}
+
+.chart-title {
+  font-size: 12px;
+  font-weight: bold;
+  text-align: center;
+  margin: 0;
+  padding: 0;
+  color: #333;
+}

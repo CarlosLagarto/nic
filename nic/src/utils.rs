@@ -61,6 +61,11 @@ pub fn init_channels() -> (Arc<Sender<CtrlSignal>>, Arc<Mutex<Receiver<CtrlSigna
     (Arc::new(tx), Arc::new(Mutex::new(rx)))
 }
 
+pub fn init_broadcast_channels() -> (tokio::sync::broadcast::Sender<CtrlSignal>, tokio::sync::broadcast::Receiver<CtrlSignal>) {
+    let (tx, rx) = broadcast::channel::<CtrlSignal>(MAX_MSGS);
+    (tx, rx)
+}
+
 /// Assumes that whevever the machine stops, nect start will be with 0 progress.<br>
 /// It is not supposed that the machine stops.  It it does (maintenance), or other reason, we do not know for sure how long it stopped.<br>
 pub fn load_sectors_into_hashmap(sectors: Vec<SectorInfo>) -> HashMap<u32, SectorInfo> {

@@ -13,10 +13,7 @@ use crate::{
     utils::sod,
 };
 use std::sync::Arc;
-use tokio::sync::{
-    broadcast::{Receiver, Sender},
-    Mutex,
-};
+use tokio::sync::{broadcast::Receiver, Mutex};
 use tracing::info;
 
 #[derive(Debug)]
@@ -25,7 +22,7 @@ pub struct WateringSystem {
     pub controller: Arc<dyn SensorController>, // Sensor controller (mockable)
     pub time_provider: Arc<dyn TimeProvider>,  // Injected time provider
     pub db: Arc<dyn DatabaseTrait>,            // Injected db provider
-    pub web_tx: Arc<Sender<CtrlSignal>>,
+    pub web_tx: tokio::sync::broadcast::Sender<CtrlSignal>,
     pub sm_rx: Arc<Mutex<Receiver<CtrlSignal>>>,
 }
 

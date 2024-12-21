@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1.83"
-axum = { version = "0.7.9", features = ["macros", "tokio"] }
+axum = { version = "0.7.9", features = ["macros", "tokio", "ws"] }
 axum-server = "0.7.1"
 chrono = "0.4"
 futures-util = "0.3"
